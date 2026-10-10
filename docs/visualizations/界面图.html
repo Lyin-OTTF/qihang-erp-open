@@ -1,0 +1,1238 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>启航电商 ERP - 全功能阐述图</title>
+  <style>
+    :root {
+      --ink: #15232c;
+      --muted: #5f707b;
+      --page: #f4f7f8;
+      --panel: #ffffff;
+      --line: #d7e1e5;
+      --teal: #0d6b6f;
+      --teal-soft: #e6f3f2;
+      --blue: #315f96;
+      --blue-soft: #e9f0f8;
+      --orange: #bd5b26;
+      --orange-soft: #faeee7;
+      --green: #3f7d58;
+      --green-soft: #e9f3ec;
+      --red: #aa4545;
+      --red-soft: #f8eaea;
+      --shadow: 0 10px 30px rgba(24, 48, 61, 0.08);
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        linear-gradient(rgba(13, 107, 111, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(13, 107, 111, 0.035) 1px, transparent 1px),
+        var(--page);
+      background-size: 28px 28px;
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    a { color: var(--teal); }
+    button, input { font: inherit; }
+    .page {
+      width: min(1600px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 56px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.75fr);
+      gap: 20px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-top: 6px solid var(--teal);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 28px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--teal);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 26px;
+      height: 2px;
+      background: var(--teal);
+    }
+
+    h1, h2, h3, p { margin-top: 0; }
+    h1, h2, h3, p, li, summary, .chip {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    h1 {
+      margin: 10px 0 12px;
+      font-size: clamp(30px, 4vw, 52px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin-bottom: 8px;
+      font-size: 24px;
+      line-height: 1.25;
+    }
+
+    h3 {
+      margin-bottom: 6px;
+      font-size: 18px;
+      line-height: 1.35;
+    }
+
+    .lead {
+      max-width: 900px;
+      margin-bottom: 18px;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .hero-note {
+      align-self: stretch;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      border-left: 1px solid var(--line);
+      padding-left: 22px;
+    }
+
+    .hero-note strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 17px;
+    }
+
+    .hero-note p {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .tag, .chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 26px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .tag.visible { color: var(--teal); background: var(--teal-soft); }
+    .tag.hidden { color: var(--orange); background: var(--orange-soft); }
+    .tag.backend { color: var(--blue); background: var(--blue-soft); }
+    .tag.ai { color: var(--green); background: var(--green-soft); }
+    .tag.risk { color: var(--red); background: var(--red-soft); }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0;
+    }
+
+    .stat {
+      min-height: 104px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.94);
+      padding: 16px;
+    }
+
+    .stat-value {
+      display: block;
+      color: var(--teal);
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+
+    .stat-label {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .section {
+      margin-top: 26px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      padding: 22px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+
+    .section-head p {
+      margin-bottom: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .architecture {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .layer {
+      min-height: 178px;
+      border: 1px solid var(--line);
+      border-top: 4px solid var(--teal);
+      border-radius: var(--radius);
+      padding: 14px;
+      background: #fbfdfd;
+    }
+
+    .layer:nth-child(2) { border-top-color: var(--blue); }
+    .layer:nth-child(3) { border-top-color: var(--orange); }
+    .layer:nth-child(4) { border-top-color: var(--green); }
+    .layer:nth-child(5) { border-top-color: var(--red); }
+    .layer h3 { font-size: 16px; }
+    .layer ul, .feature-list, .flow-list {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .layer li, .feature-list li, .flow-list li {
+      margin: 5px 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(112px, 1fr));
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .flow-step {
+      position: relative;
+      min-height: 112px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfdfd;
+      padding: 13px;
+    }
+
+    .flow-step:not(:last-child)::after {
+      content: "\2192";
+      position: absolute;
+      top: 50%;
+      right: -12px;
+      z-index: 2;
+      width: 12px;
+      color: var(--teal);
+      background: var(--panel);
+      text-align: center;
+      font-size: 16px;
+      font-weight: 800;
+      transform: translate(50%, -50%);
+    }
+
+    .flow-step strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--ink);
+      font-size: 14px;
+    }
+
+    .flow-step span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .toolbar {
+      position: sticky;
+      top: 8px;
+      z-index: 20;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 8px 24px rgba(24, 48, 61, 0.07);
+      padding: 10px;
+      backdrop-filter: blur(8px);
+    }
+
+    .search {
+      flex: 1 1 320px;
+      min-width: 220px;
+      height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      padding: 0 12px;
+      outline: none;
+    }
+
+    .search:focus {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px rgba(13, 107, 111, 0.12);
+    }
+
+    .filter, .print {
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      cursor: pointer;
+      padding: 0 13px;
+    }
+
+    .filter:hover, .print:hover { border-color: var(--teal); color: var(--teal); }
+    .filter.is-active {
+      border-color: var(--teal);
+      background: var(--teal);
+      color: #fff;
+    }
+
+    .result-count {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .feature-card {
+      display: flex;
+      flex-direction: column;
+      min-height: 360px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+      padding: 18px;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-2px);
+      border-color: #b8cbd0;
+      box-shadow: 0 12px 28px rgba(24, 48, 61, 0.1);
+    }
+
+    .feature-card[hidden] { display: none; }
+
+    .card-head {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .card-index {
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 38px;
+      width: 38px;
+      height: 38px;
+      border-radius: 6px;
+      background: var(--teal-soft);
+      color: var(--teal);
+      font-weight: 800;
+    }
+
+    .card-title {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .card-title p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .feature-list {
+      flex: 1;
+    }
+
+    details {
+      margin-top: 12px;
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+
+    summary {
+      color: var(--teal);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .chip {
+      color: var(--muted);
+      background: #f4f7f8;
+      border-color: #e2e9ec;
+      font-weight: 500;
+    }
+
+    .flow-cards {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .flow-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfdfd;
+      padding: 16px;
+    }
+
+    .flow-card h3 {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .flow-card h3::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--teal);
+    }
+
+    .table-wrap { overflow: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background: #edf3f4;
+      color: var(--ink);
+    }
+
+    .route-groups {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .route-group {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+      background: #fbfdfd;
+    }
+
+    .route-group h3 { font-size: 15px; }
+    .route-group p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .note {
+      border-left: 4px solid var(--orange);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      background: var(--orange-soft);
+      padding: 12px 14px;
+      color: #74401f;
+      font-size: 13px;
+    }
+
+    .footer {
+      margin-top: 22px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 12px;
+    }
+
+    @media (max-width: 1180px) {
+      .hero { grid-template-columns: 1fr; }
+      .hero-note { border-left: 0; border-top: 1px solid var(--line); padding: 18px 0 0; }
+      .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .architecture { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow { grid-template-columns: repeat(4, minmax(120px, 1fr)); }
+      .flow-step:nth-child(4)::after { display: none; }
+      .route-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 820px) {
+      .page { width: min(1600px, calc(100% - 18px)); padding-top: 10px; }
+      .hero, .section { padding: 16px; }
+      .stats, .feature-grid, .flow-cards, .route-groups { grid-template-columns: 1fr; }
+      .architecture { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .flow-step { min-height: auto; }
+      .flow-step:not(:last-child)::after {
+        content: "\2193";
+        top: auto;
+        right: auto;
+        bottom: -12px;
+        left: 50%;
+        width: auto;
+        transform: translateX(-50%);
+      }
+      .flow-step:nth-child(n)::after { display: block; }
+      .flow-step:last-child::after { display: none; }
+      .section-head { display: block; }
+      .toolbar { position: static; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .page { width: 100%; padding: 0; }
+      .toolbar, .print, .filter { display: none !important; }
+      .feature-card[hidden] { display: flex !important; }
+      .hero, .section, .stat { box-shadow: none; break-inside: avoid; }
+      .feature-card, .flow-card, .route-group { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <span class="eyebrow">Qihang ERP / Feature Atlas</span>
+        <h1>启航电商 ERP 全功能阐述图</h1>
+        <p class="lead">
+          面向多平台、多店铺电商业务的订单与进销存中台。当前代码由 Vue 3 管理端、Spring Boot 4.1 单体应用、
+          ERP/OMS/AI 控制器、平台 SDK 与 MySQL/Redis/SSE/Webhook 基础设施构成。本图以当前代码入口为准，
+          同时标出菜单可见、隐藏入口和后台扩展能力。
+        </p>
+        <div class="legend">
+          <span class="tag visible">菜单可见</span>
+          <span class="tag hidden">隐藏/子页面</span>
+          <span class="tag backend">接口/后台能力</span>
+          <span class="tag ai">AI 与实时能力</span>
+          <span class="tag risk">开发中/扩展域</span>
+        </div>
+      </div>
+      <aside class="hero-note">
+        <div>
+          <strong>阅读方式</strong>
+          <p>先看端到端业务流，再按功能域扫描卡片。可搜索“退货、云仓、面单、库存预警、AI”等关键词，快速定位能力。</p>
+        </div>
+        <div class="note">
+          备注：README 中标注“开发中”的多商户、多仓库、多供应商能力在代码中已有大量入口，
+          但不同部署是否挂载菜单取决于 `sys_menu` 与权限配置。
+        </div>
+      </aside>
+    </section>
+
+    <section class="stats" aria-label="代码规模概览">
+      <div class="stat"><span class="stat-value">9</span><span class="stat-label">菜单一级业务域</span></div>
+      <div class="stat"><span class="stat-value">57</span><span class="stat-label">当前菜单路由页面</span></div>
+      <div class="stat"><span class="stat-value">65</span><span class="stat-label">后端 Controller</span></div>
+      <div class="stat"><span class="stat-value">290+</span><span class="stat-label">REST 接口映射</span></div>
+      <div class="stat"><span class="stat-value">11</span><span class="stat-label">AI 业务查询工具</span></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>一、系统分层架构</h2>
+          <p>从平台接入到业务中台、履约、库存、AI 与数据基础设施，形成一套可对接外部 ERP/WMS/财务系统的基础底座。</p>
+        </div>
+      </div>
+      <div class="architecture">
+        <article class="layer">
+          <h3>访问与角色入口</h3>
+          <ul>
+            <li>Vue 3 管理端、首页驾驶舱、帮助中心</li>
+            <li>供应商门户：产品、报价、备货、库存、客户</li>
+            <li>OpenAPI、OAuth 回调、SSE 浏览器消息</li>
+            <li>飞书/钉钉/企微 Webhook 外部通知</li>
+          </ul>
+        </article>
+        <article class="layer">
+          <h3>应用与接口层</h3>
+          <ul>
+            <li>ERP 核心控制器：商品、订单、采购、售后、库存</li>
+            <li>OMS 平台控制器：店铺、商品、订单、退款、面单</li>
+            <li>开放 API：商品/SKU 等外部系统对接</li>
+            <li>AI 控制器：聊天、简报、分析、模型配置</li>
+          </ul>
+        </article>
+        <article class="layer">
+          <h3>核心业务域</h3>
+          <ul>
+            <li>商品主数据、店铺商品映射、SKU 绑定</li>
+            <li>订单聚合、审核、发货、售后处理</li>
+            <li>采购订单、供应商、报价、入库</li>
+            <li>仓库、库位、批次、出入库、库存预警</li>
+          </ul>
+        </article>
+        <article class="layer">
+          <h3>平台与外部系统</h3>
+          <ul>
+            <li>淘宝、京东、拼多多、抖店、微信小店等平台</li>
+            <li>物流公司、电子面单、三方云仓</li>
+            <li>供应商代发、第三方 ERP/WMS/OMS</li>
+            <li>OpenAI 兼容模型、向量与 RAG 能力</li>
+          </ul>
+        </article>
+        <article class="layer">
+          <h3>数据与运行基础设施</h3>
+          <ul>
+            <li>MySQL 8：交易、主数据、配置、日志</li>
+            <li>Redis：缓存、任务与运行态支撑</li>
+            <li>文件/图片存储与静态资源服务</li>
+            <li>SSE、定时任务、消息推送、调用日志</li>
+          </ul>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>二、主业务闭环</h2>
+          <p>电商 ERP 的主链路围绕“平台接入 → 商品映射 → 拉单 → 履约 → 库存 → 售后 → 分析预警”闭环展开。</p>
+        </div>
+      </div>
+      <div class="flow" aria-label="ERP 主业务闭环">
+        <div class="flow-step"><strong>平台店铺接入</strong><span>店铺建档、平台开关、OAuth 授权、AppKey/Token</span></div>
+        <div class="flow-step"><strong>商品与 SKU 映射</strong><span>ERP 商品库、店铺商品拉取、平台 SKU 绑定 ERP SKU</span></div>
+        <div class="flow-step"><strong>订单聚合</strong><span>定时拉单、手动建单、订单库、店铺订单、明细</span></div>
+        <div class="flow-step"><strong>履约分派</strong><span>手工发货、电子面单、供应商代发、云仓推送</span></div>
+        <div class="flow-step"><strong>库存作业</strong><span>备货、拣货、扫码出库、采购入库、批次与库位</span></div>
+        <div class="flow-step"><strong>物流回传</strong><span>运单、快递公司、轨迹、平台发货状态同步</span></div>
+        <div class="flow-step"><strong>售后与分析</strong><span>退款拉取、退货/换货/补发、AI 简报、库存与运营预警</span></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>三、功能域全景</h2>
+          <p>每张卡片代表一个用户任务域；展开“代码入口”可以查看该域包含的页面、接口或运行组件。</p>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <input id="search" class="search" type="search" placeholder="搜索功能，例如：退货、电子面单、云仓、库存预警、AI、SKU">
+        <button class="filter is-active" data-kind="all" type="button">全部</button>
+        <button class="filter" data-kind="visible" type="button">菜单可见</button>
+        <button class="filter" data-kind="hidden" type="button">隐藏/扩展</button>
+        <button class="filter" data-kind="ai" type="button">AI/实时</button>
+        <button class="print" id="print" type="button">打印 / 导出 PDF</button>
+        <span class="result-count" id="result-count"></span>
+      </div>
+
+      <div class="feature-grid" id="feature-grid">
+        <article class="feature-card" data-kind="visible ai" data-search="首页 驾驶舱 AI简报 销售额 订单数 待发货 退款率 待办 刷新 帮助中心 个人中心">
+          <div class="card-head">
+            <span class="card-index">01</span>
+            <div class="card-title">
+              <h3>首页、驾驶舱与 AI 简报</h3>
+              <p>把当天经营状态和待处理事项放在第一屏。</p>
+            </div>
+            <span class="tag ai">AI</span>
+          </div>
+          <ul class="feature-list">
+            <li>今日销售额、订单数、待发货、退款率四项经营指标。</li>
+            <li>AI 问候、经营摘要、趋势判断与模型未配置提示。</li>
+            <li>按高/中/低优先级呈现待办事项，并可跳转到对应业务页面。</li>
+            <li>首页刷新、AI 模型配置入口、帮助中心、个人中心与退出登录。</li>
+            <li>顶部通知铃铛展示未读系统消息，支持单条已读与全部已读。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">dashboard/index</span><span class="chip">AiBriefController</span>
+              <span class="chip">/api/ai/brief</span><span class="chip">Navbar SSE</span>
+              <span class="chip">/help</span><span class="chip">/user/profile</span>
+            </div>
+          </details>
+        </article>
+
+        <article class="feature-card" data-kind="hidden ai" data-search="AI助手 对话 流式 SSE 会话历史 Markdown 模型配置 智能分析 销售分析 库存优化 客户洞察 运营效率 采购分析 历史记录 停止分析 重新分析">
+          <div class="card-head">
+            <span class="card-index">02</span>
+            <div class="card-title">
+              <h3>AI 助手、智能分析与模型配置</h3>
+              <p>自然语言查询业务数据，并支持专题分析、历史记录和模型管理。</p>
+            </div>
+            <span class="tag ai">AI</span>
+          </div>
+          <ul class="feature-list">
+            <li>悬浮 AI 助手：新建对话、Markdown 流式响应、思考态、错误提示、Ctrl+Enter 发送。</li>
+            <li>会话接口：历史消息、会话列表、删除会话，支持按 `sessionId` 延续上下文。</li>
+            <li>五类智能分析模板：销售、库存优化、客户洞察、运营效率、采购分析。</li>
+            <li>流式分析、停止分析、重新分析、历史列表、结果查看与记录删除。</li>
+            <li>模型配置：兼容 OpenAI API 的地址/Key/模型，增删改查、默认模型、停用/启用。</li>
+            <li>AI 工具覆盖店铺、订单、售后、商品、库存、采购、会员、供应商、物流、仓库和库存流水。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">ChatWidget</span><span class="chip">ai/analysis</span><span class="chip">ai/config</span>
+              <span class="chip">/api/ai/chat/send</span><span class="chip">/api/ai/analysis/execute</span>
+              <span class="chip">ShopTools</span><span class="chip">OrderTools</span><span class="chip">RefundTools</span>
+              <span class="chip">GoodsTools</span><span class="chip">InventoryTools</span><span class="chip">PurchaseTools</span>
+            </div>
+          </details>
+        </article>
+
+        <article class="feature-card" data-kind="hidden ai" data-search="通知渠道 飞书 钉钉 企业微信 Webhook 测试推送 自动重试 库存预警 供应商库存 自发仓库存 库存阈值 批次 库存详情 SSE">
+          <div class="card-head">
+            <span class="card-index">03</span>
+            <div class="card-title">
+              <h3>通知中心、外部推送与库存预警</h3>
+              <p>让低库存、发货积压、退款异常等风险主动通知到人。</p>
+            </div>
+            <span class="tag ai">实时</span>
+          </div>
+          <ul class="feature-list">
+            <li>站内消息：未读列表、数量、单条已读、全部已读、重新通知。</li>
+            <li>SSE 实时推送：浏览器无需刷新即可收到新消息并弹窗提醒。</li>
+            <li>外部通知渠道：飞书、钉钉、企业微信 Webhook 配置、启用/停用、测试推送、删除。</li>
+            <li>分级推送：高优先级实时外推，中低优先级进入系统消息或按策略外推。</li>
+            <li>库存预警：供应商库存、自发仓库存、SKU 阈值设置、库存批次与仓位明细。</li>
+            <li>预警类型覆盖销售为零、发货积压、退款过多、库存不足、订单超时和 AI 识别异常。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">SysMessageController</span><span class="chip">SysAlertChannelController</span>
+              <span class="chip">NotifyController</span><span class="chip">stock_alert/index</span>
+              <span class="chip">alert.vue</span><span class="chip">alert_local.vue</span>
+              <span class="chip">system/alertChannel</span>
+            </div>
+          </details>
+        </article>
+
+        <article class="feature-card" data-kind="visible" data-search="商品库 商品 SKU 商品分类 属性 属性值 品牌 供应商产品 店铺商品 拉取商品 ERP商品 绑定 手动新增 商品图片 价格 库存模式">
+          <div class="card-head">
+            <span class="card-index">04</span>
+            <div class="card-title">
+              <h3>商品主数据与店铺商品</h3>
+              <p>维护 ERP 商品、SKU、平台商品以及两者之间的映射关系。</p>
+            </div>
+            <span class="tag visible">商品</span>
+          </div>
+          <ul class="feature-list">
+            <li>商品库：商品新增、编辑、删除、查询、图片、编码、价格、商户、计价方式和库存模式。</li>
+            <li>SKU 管理：新增、编辑、明细查询、规格属性、平台 SKU 绑定、库存展示。</li>
+            <li>商品分类：分类树维护；分类规格属性与属性值维护。</li>
+            <li>品牌管理：品牌名称、编码、状态、排序等基础资料。</li>
+            <li>供应商产品：产品库、SKU、供应商产品关联、上下架与 ERP 商品绑定。</li>
+            <li>店铺商品：平台拉取、手工添加、商品与 SKU 维护、线下 SKU、关联 ERP SKU。</li>
+            <li>库存查询：按商品/SKU/仓库查看库存、锁定库存、批次和仓位明细。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">GoodsController</span><span class="chip">GoodsCategoryController</span>
+              <span class="chip">GoodsBrandController</span><span class="chip">ShopGoodsController</span>
+              <span class="chip">goods/index</span><span class="chip">goods/spec</span>
+              <span class="chip">goods_category/attribute</span><span class="chip">shop_goods</span>
+            </div>
+          </details>
+        </article>
+
+        <article class="feature-card" data-kind="visible" data-search="订单库 订单明细 店铺订单 内销订单 手动建单 拉单 推OMS 订单取消 订单审核 自动关联SKU 收件人 支付方式 平台订单 多平台 多店铺">
+          <div class="card-head">
+            <span class="card-index">05</span>
+            <div class="card-title">
+              <h3>订单聚合、店铺订单与内销订单</h3>
+              <p>统一承接不同平台、不同店铺与线下渠道的销售订单。</p>
+            </div>
+            <span class="tag visible">订单</span>
+          </div>
+          <ul class="feature-list">
+            <li>订单库：多平台订单聚合、筛选、详情、状态与收件信息。</li>
+            <li>订单明细：商品行、SKU 映射、供应商/发货方等业务字段更新。</li>
+            <li>店铺订单：列表、明细、手工创建、平台拉取、推送 OMS。</li>
+            <li>订单处理：手工发货、分配发货单、取消订单、待发货与待分配列表。</li>
+            <li>自动/手动将平台商品行关联到 ERP SKU，确保库存与采购链路可追踪。</li>
+            <li>支持淘宝、京东、拼多多、抖店、微信小店、快手、小红书等平台的接入代码或扩展模型。</li>
+            <li>会员、营销折扣与订单促销模型可在当前代码基础上扩展。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">OrderController</span><span class="chip">OrderItemController</span>
+              <span class="chip">ShopOrderController</span><span class="chip">order/index</span>
+              <span class="chip">order/item_list</span><span class="chip">shop/order/create</span>
+              <span class="chip">manualShipment</span><span class="chip">allocateShipmentOrder</span>
+            </div>
+          </details>
+        </article>
+
+        <article class="feature-card" data-kind="visible" data-search="采购订单 创建采购 采购审核 采购入库 采购物流 收货 入库单 供应商档案 供应商报价 报价审核 自动审核规则 采购承运商 供应商SKU 绑定">
+          <div class="card-head">
+            <span class="card-index">06</span>
+            <div class="card-title">
+              <h3>采购、供应商与报价协同</h3>
+              <p>连接商品需求、供应商供货、采购物流与实际入库。</p>
+            </div>
+            <span class="tag visible">采购</span>
+          </div>
+          <ul class="feature-list">
+            <li>采购订单：创建、编辑、审核、查询、详情、采购商品明细和收货。</li>
+            <li>采购入库：采购物流、收货确认、生成入库单、入库数量与状态跟踪。</li>
+            <li>供应商档案：基础信息、联系人、账号、承运能力、供应商产品关联。</li>
+            <li>供应商报价：报价列表、详情、审核动作、自动审核规则和价格保存。</li>
+            <li>供应商 SKU：查询、编辑、删除、绑定 ERP SKU。</li>
+            <li>采购承运商与物流：承运商维护、采购物流列表、状态更新和费用确认。</li>
+            <li>供应商门户代码：供货关系、备货、库存、客户与产品管理等扩展页面。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">PurchaseOrderController</span><span class="chip">PurchaseOrderShipController</span>
+              <span class="chip">SupplierController</span><span class="chip">SupplierPriceController</span>
+              <span class="chip">SupplierGoodsController</span><span class="chip">purchase/order</span>
+              <span class="chip">purchase/ship</span><span class="chip">supplier_list</span>
+            </div>
+          </details>
+        </article>
+
+        <article class="feature-card" data-kind="visible" data-search="手动发货 打单发货 电子面单 打印 供应商发货 云仓发货 发货记录 物流跟踪 快递设置 面单账户 模板 运费 承运商 默认快递">
+          <div class="card-head">
+            <span class="card-index">07</span>
+            <div class="card-title">
+              <h3>履约发货与物流协同</h3>
+              <p>按仓、按供应商、按云仓分派订单，并用面单和物流轨迹完成闭环。</p>
+            </div>
+            <span class="tag visible">发货</span>
+          </div>
+          <ul class="feature-list">
+            <li>手动发货：待发货订单、录入物流公司、运单号、发货确认。</li>
+            <li>打单发货：平台/店铺维度的电子面单获取、打印与发货。</li>
+            <li>供应商发货：订单/明细分派、供应商确认、发货单与物流回填。</li>
+            <li>云仓发货：待推送订单、推送云仓、云仓回传、隐藏的手动确认入口。</li>
+            <li>发货记录与物流跟踪：本地/云仓发货记录、物流轨迹和状态查询。</li>
+            <li>电子面单设置：账户、平台模板、发货网点、发件人、分享与账号更新。</li>
+            <li>快递设置：平台可用快递、收藏快递、默认快递、停用/启用。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">ShipOrderVendorController</span><span class="chip">ShipOrderCloudWarehouseController</span>
+              <span class="chip">ShopWaybillAccountController</span><span class="chip">ShipLogisticsController</span>
+              <span class="chip">ShipRecordController</span><span class="chip">shipping/index</span>
+              <span class="chip">shipping/ewaybillPrint</span><span class="chip">shipping/cloud_warehouse</span>
+            </div>
+          </details>
+        </article>
+
+        <article class="feature-card" data-kind="visible hidden" data-search="售后 退款 退货 换货 补发 售后台账 店铺售后 拉取退款 推送OMS 售后处理 退回物流 收货人 售后状态 退款原因">
+          <div class="card-head">
+            <span class="card-index">08</span>
+            <div class="card-title">
+              <h3>售后、退款与处理台账</h3>
+              <p>聚合并处理平台退款、退货、换货和补发，保留业务处理结果。</p>
+            </div>
+            <span class="tag visible">售后</span>
+          </div>
+          <ul class="feature-list">
+            <li>店铺售后：平台售后列表、单条/批量拉取、详情拉取、推送 OMS。</li>
+            <li>订单售后库：聚合全部平台售后，查看订单、商品与退款信息。</li>
+            <li>售后台账：记录售后类型、原因、处理状态和结果。</li>
+            <li>退货：退回物流公司、物流单号、收件人、收件电话与地址。</li>
+            <li>换货/补发：关联售后单、订单号和商品，记录后续发货结果。</li>
+            <li>售后处理完成后，可将状态与结果回传平台或第三方系统。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">ShopRefundController</span><span class="chip">RefundController</span>
+              <span class="chip">AfterSaleProcessingController</span><span class="chip">shop/refund</span>
+              <span class="chip">afterSale/index</span><span class="chip">refund/index</span>
+            </div>
+          </details>
+        </article>
+
+        <article class="feature-card" data-kind="visible hidden" data-search="仓库 库存 入库 出库 发货出库 备货单 拣货 扫码出库 仓位 库位 批次 库存锁定 库存调整 盘点 采购入库 云仓入库 库存流水">
+          <div class="card-head">
+            <span class="card-index">09</span>
+            <div class="card-title">
+              <h3>仓库、库存与出入库作业</h3>
+              <p>把订单履约、采购收货和库存台账连接到仓库现场作业。</p>
+            </div>
+            <span class="tag visible">WMS</span>
+          </div>
+          <ul class="feature-list">
+            <li>订单发货出库：备货单、订单/商品明细、按商品或整单生成出库单。</li>
+            <li>出库管理：新建出库单、列表、详情、打印和出库作业。</li>
+            <li>扫码出库：SKU/批次匹配、库存校验、扫码数量和出库成功反馈。</li>
+            <li>入库管理：新建入库单、列表、详情、本仓入库、云仓入库申请。</li>
+            <li>库存与批次：商品/SKU 库存、批次剩余量、采购单价、库位、锁定库存。</li>
+            <li>仓库管理：本地仓、云仓、商户可用仓库、仓库状态与配置。</li>
+            <li>仓位管理：仓库库位新增、编辑、查询、删除和库位选择。</li>
+            <li>后台还包含库存锁定、库存调拨、盘点、批次与库存流水服务模型。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">StockingController</span><span class="chip">StockOutController</span>
+              <span class="chip">StockInController</span><span class="chip">GoodsInventoryController</span>
+              <span class="chip">WarehouseController</span><span class="chip">stock_out</span>
+              <span class="chip">stock_in</span><span class="chip">warehouse/position</span>
+            </div>
+          </details>
+        </article>
+
+        <article class="feature-card" data-kind="visible hidden" data-search="店铺 商户 店铺分组 平台开关 区域 OAuth 授权 Token AppKey AppSecret 拉取日志 国家地区 物流公司库 平台参数">
+          <div class="card-head">
+            <span class="card-index">10</span>
+            <div class="card-title">
+              <h3>渠道、商户与平台授权</h3>
+              <p>管理总部-商户-店铺的渠道层级，以及每个平台的接口授权。</p>
+            </div>
+            <span class="tag visible">渠道</span>
+          </div>
+          <ul class="feature-list">
+            <li>店铺管理：新增、编辑、删除、分页、平台信息、商户归属和授权状态。</li>
+            <li>商户管理：商户列表、详情、新增、编辑、删除和可用商户列表。</li>
+            <li>平台开关：平台名称、编码、启用状态与业务参数。</li>
+            <li>接口授权：AppKey、AppSecret、Token、授权范围与开放接口鉴权配置。</li>
+            <li>平台 OAuth：淘宝、京东、拼多多、抖店、微店/微信等回调与 Token 保存。</li>
+            <li>平台拉取日志：订单、售后等拉取任务的结果、时间和失败原因。</li>
+            <li>国家地区、店铺分组、物流公司库等基础数据配置。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">ShopController</span><span class="chip">MerchantController</span>
+              <span class="chip">SysOpenAuthController</span><span class="chip">ShopPullLogsController</span>
+              <span class="chip">TaoOAuthController</span><span class="chip">JdOAuthController</span>
+              <span class="chip">PddOAuthController</span><span class="chip">DouOAuthController</span>
+            </div>
+          </details>
+        </article>
+
+        <article class="feature-card" data-kind="visible hidden" data-search="系统设置 用户 部门 角色 RBAC 菜单 权限 字典 参数配置 通知渠道 个人中心 修改密码 头像 验证码 登录 动态路由 图片上传">
+          <div class="card-head">
+            <span class="card-index">11</span>
+            <div class="card-title">
+              <h3>系统管理、权限与基础配置</h3>
+              <p>为所有业务域提供登录、组织、权限、字典、参数与文件能力。</p>
+            </div>
+            <span class="tag visible">系统</span>
+          </div>
+          <ul class="feature-list">
+            <li>登录、退出、验证码、当前用户信息与动态菜单/路由。</li>
+            <li>用户管理：新增、编辑、删除、状态、重置密码、分配角色、部门归属。</li>
+            <li>角色权限：角色维护、菜单权限、数据范围、已分配/未分配用户。</li>
+            <li>菜单管理：目录、菜单、按钮权限、显示/隐藏、排序和路由参数。</li>
+            <li>部门、字典类型、字典数据、系统参数与字典缓存刷新。</li>
+            <li>个人中心：基本资料、头像、联系方式、修改密码。</li>
+            <li>图片上传与对象存储、帮助文档、401/404 等通用页面。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">SysLoginController</span><span class="chip">SysUserController</span>
+              <span class="chip">SysRoleController</span><span class="chip">SysMenuController</span>
+              <span class="chip">SysDeptController</span><span class="chip">SysDictTypeController</span>
+              <span class="chip">SysConfigController</span><span class="chip">SysProfileController</span>
+            </div>
+          </details>
+        </article>
+
+        <article class="feature-card" data-kind="visible hidden" data-search="定时任务 任务日志 报表 商品报表 店铺报表 库存报表 财务 费用 结算 财务流水 平台账单导入 第三方系统 推送 反馈 恢复记录 抵扣 日报 行情 报价">
+          <div class="card-head">
+            <span class="card-index">12</span>
+            <div class="card-title">
+              <h3>报表、定时任务与扩展业务域</h3>
+              <p>包含当前菜单、隐藏页面和后台服务层中的经营分析及企业扩展能力。</p>
+            </div>
+            <span class="tag risk">扩展</span>
+          </div>
+          <ul class="feature-list">
+            <li>定时任务：任务配置、Cron、启停、立即执行、任务日志与失败跟踪。</li>
+            <li>报表页面：商品销售、店铺经营、库存报表、每日销售与 TOP SKU。</li>
+            <li>会员与营销：会员资料、会员等级/积分模型、折扣规则、订单促销。</li>
+            <li>财务服务：订单结算、费用/报销、财务流水、平台账单导入模型已存在后端服务与数据表。</li>
+            <li>第三方协同：第三方系统配置、推送、反馈、恢复记录与抵扣模型。</li>
+            <li>供应链扩展：供应商客户、每日报价、采购费用确认、报价自动审核规则。</li>
+            <li>企业版/隐藏域：多商户价格、仓库共享、库存调拨、库存锁定、云仓与供应商协同。</li>
+          </ul>
+          <details>
+            <summary>代码入口</summary>
+            <div class="chips">
+              <span class="chip">SysTaskController</span><span class="chip">ReportController</span>
+              <span class="chip">FmsOrderSettlementService</span><span class="chip">FmsExpenseService</span>
+              <span class="chip">FmsFinanceLedgerService</span><span class="chip">PlatformBillImportService</span>
+              <span class="chip">SysThirdSystemPushService</span><span class="chip">GoodsInventoryTransferService</span>
+            </div>
+          </details>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>四、关键业务流程拆解</h2>
+          <p>下面五条流程最能体现系统内部的数据流转与跨模块协同。</p>
+        </div>
+      </div>
+      <div class="flow-cards">
+        <article class="flow-card">
+          <h3>平台初始化</h3>
+          <ol class="flow-list">
+            <li>维护店铺及商户归属，启用对应电商平台。</li>
+            <li>跳转平台 OAuth 或录入 AppKey，保存 AccessToken/会话凭证。</li>
+            <li>定时任务拉取店铺商品与订单。</li>
+            <li>在拉取日志中检查成功、失败和重试情况。</li>
+            <li>完成 ERP SKU 与店铺 SKU 绑定后进入日常业务。</li>
+          </ol>
+        </article>
+        <article class="flow-card">
+          <h3>订单到发货</h3>
+          <ol class="flow-list">
+            <li>订单库/店铺订单聚合平台订单，或手工创建内销订单。</li>
+            <li>审核订单并自动或手动关联 ERP SKU。</li>
+            <li>在发货中心选择手工、电子面单、供应商或云仓履约。</li>
+            <li>仓库生成备货/出库单，扫码或人工完成出库。</li>
+            <li>回填运单和物流轨迹，将发货状态回传平台。</li>
+          </ol>
+        </article>
+        <article class="flow-card">
+          <h3>采购到入库</h3>
+          <ol class="flow-list">
+            <li>基于补货需求创建采购订单，选择供应商和采购明细。</li>
+            <li>供应商报价/审核规则辅助选品与定价。</li>
+            <li>供应商发货并录入采购物流。</li>
+            <li>收货确认后生成采购入库单。</li>
+            <li>入库增加库存，形成批次、库位、价格与库存流水。</li>
+          </ol>
+        </article>
+        <article class="flow-card">
+          <h3>售后闭环</h3>
+          <ol class="flow-list">
+            <li>平台售后列表/详情拉取到店铺售后。</li>
+            <li>售后单推送到 OMS 售后中心并聚合到订单售后库。</li>
+            <li>根据业务选择退货、换货或补发处理。</li>
+            <li>录入退回物流、收件信息或补发发货信息。</li>
+            <li>更新处理结果和售后台账，并按需回传平台/第三方。</li>
+          </ol>
+        </article>
+        <article class="flow-card">
+          <h3>AI 分析、消息与外部通知</h3>
+          <ol class="flow-list">
+            <li>模型配置提供 OpenAI 兼容的地址、Key、模型和默认配置。</li>
+            <li>AI 助手或专题分析按问题调用订单、库存、售后等业务工具。</li>
+            <li>结果通过 SSE 流式返回，并写入分析历史记录。</li>
+            <li>定时监控发现销售、库存、发货或退款异常。</li>
+            <li>消息写入系统通知表，经 SSE 展示，并按等级推送到飞书/钉钉/企微。</li>
+          </ol>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>五、菜单路由覆盖清单</h2>
+          <p>以下按 `menus.json` 的实际一级域归纳 57 个叶路由，隐藏页也在清单中保留。</p>
+        </div>
+      </div>
+      <div class="route-groups">
+        <article class="route-group">
+          <h3>商品管理</h3>
+          <p>商品库、SKU 明细、添加商品、新增 SKU、供应商产品、店铺商品、分类、品牌、添加 ERP 商品、手工店铺商品、分类规格属性、规格属性值。</p>
+        </article>
+        <article class="route-group">
+          <h3>采购管理</h3>
+          <p>采购订单、采购入库、创建采购订单、生成采购入库单、采购详情、供应商报价、供应商档案、采购承运商。</p>
+        </article>
+        <article class="route-group">
+          <h3>订单管理</h3>
+          <p>订单库、订单明细、店铺订单、手工店铺订单、店铺售后、售后台账。</p>
+        </article>
+        <article class="route-group">
+          <h3>发货管理</h3>
+          <p>手动发货、打单发货、供应商发货、云仓发货、云仓手动确认、发货记录、电子面单设置、发货快递设置。</p>
+        </article>
+        <article class="route-group">
+          <h3>售后管理</h3>
+          <p>订单售后库。</p>
+        </article>
+        <article class="route-group">
+          <h3>仓库管理</h3>
+          <p>订单发货出库、出库管理、新建出库单、出库作业、商品库存查询、入库管理、入库作业、新建入库单、仓库管理、仓位管理。</p>
+        </article>
+        <article class="route-group">
+          <h3>渠道管理</h3>
+          <p>店铺管理、商户管理。</p>
+        </article>
+        <article class="route-group">
+          <h3>系统与接口配置</h3>
+          <p>电商平台开关、国家地区、接口授权、定时任务、平台拉取日志、快递公司库；SQL 中另有 AI 模型/智能分析与通知渠道菜单。</p>
+        </article>
+        <article class="route-group">
+          <h3>系统设置</h3>
+          <p>用户、菜单、角色、字典；代码还包含部门、参数配置、个人中心、服务监控等管理控制器。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>六、覆盖结论</h2>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>能力层次</th>
+              <th>核心价值</th>
+              <th>主要模块</th>
+              <th>状态判断</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>电商 OMS</td>
+              <td>统一承接多平台订单、售后和平台回传</td>
+              <td>渠道、商品映射、订单、发货、售后、物流、面单</td>
+              <td>代码完整，属于系统主线</td>
+            </tr>
+            <tr>
+              <td>ERP 进销存</td>
+              <td>把销售需求连接到采购、仓储、批次库存与成本</td>
+              <td>采购、供应商、仓库、入库、出库、库存、库位</td>
+              <td>核心链路已实现，部分高级能力依赖企业化配置</td>
+            </tr>
+            <tr>
+              <td>渠道与生态</td>
+              <td>连接平台、物流、云仓、供应商与第三方 ERP/WMS</td>
+              <td>OAuth、开放 API、供应商门户、云仓推送、外部推送</td>
+              <td>接口模型较多，按部署环境启用</td>
+            </tr>
+            <tr>
+              <td>AI 原生能力</td>
+              <td>自然语言查询、专题分析、经营简报和异常监控</td>
+              <td>Chat、Analysis、Brief、11 个业务 Tool、SSE、消息渠道</td>
+              <td>已实现，需配置可用大模型</td>
+            </tr>
+            <tr>
+              <td>企业管理底座</td>
+              <td>统一账号、权限、菜单、字典、任务和日志</td>
+              <td>用户、部门、角色、菜单、字典、参数、任务、文件</td>
+              <td>RBAC 基础完整</td>
+            </tr>
+            <tr>
+              <td>扩展/开发中域</td>
+              <td>财务、复杂调拨、多主体规则和第三方协同</td>
+              <td>结算、费用、财务流水、库存调拨、价格、账单导入</td>
+              <td>存在服务与数据模型，前端入口不完全或未挂菜单</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <p class="footer">
+      生成依据：当前仓库前端路由、`menus.json`、Controller/Service 代码、数据库结构与 README 功能说明；
+      主要用于架构沟通，不替代部署环境中的权限菜单和版本说明。
+    </p>
+  </main>
+
+  <script>
+    (() => {
+      const search = document.getElementById("search");
+      const cards = Array.from(document.querySelectorAll(".feature-card"));
+      const filters = Array.from(document.querySelectorAll(".filter"));
+      const count = document.getElementById("result-count");
+      let activeKind = "all";
+
+      function applyFilter() {
+        const keyword = search.value.trim().toLowerCase();
+        let visible = 0;
+        cards.forEach((card) => {
+          const kind = card.dataset.kind || "";
+          const text = `${card.dataset.search || ""} ${card.textContent || ""}`.toLowerCase();
+          const kindMatch = activeKind === "all" || kind.split(/\s+/).includes(activeKind);
+          const textMatch = !keyword || text.includes(keyword);
+          const shouldShow = kindMatch && textMatch;
+          card.hidden = !shouldShow;
+          if (shouldShow) visible += 1;
+        });
+        count.textContent = `显示 ${visible} / ${cards.length} 个功能域`;
+      }
+
+      search.addEventListener("input", applyFilter);
+      filters.forEach((button) => {
+        button.addEventListener("click", () => {
+          activeKind = button.dataset.kind || "all";
+          filters.forEach((item) => item.classList.toggle("is-active", item === button));
+          applyFilter();
+        });
+      });
+      document.getElementById("print").addEventListener("click", () => window.print());
+      applyFilter();
+    })();
+  </script>
+</body>
+</html>
