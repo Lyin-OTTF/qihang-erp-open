@@ -146,6 +146,13 @@
             <artifactId>yasson</artifactId>
             <version>3.0.4</version>
         </dependency>
+        <!-- JUnit 5 for testing -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.0</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <!-- Spring AI 2.0 BOM -->
