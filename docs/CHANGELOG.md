@@ -4,6 +4,53 @@
 
 ---
 
+## [Week6-7] 2026-10-12 — 持久化分层记忆
+
+**对应方案进度**：第二阶段 Week6-7「持久化分层记忆」（Task 19-23）
+**里程碑**：Agent 记忆四层分级落地，USER/TEAM 长期记忆 MySQL 持久化，跨租户隔离 + 敏感信息脱敏
+
+### 新增功能
+
+| 文件 | 说明 |
+|------|------|
+| `erp-api/.../agent/memory/MemoryRepository.java` | 记忆 MySQL 持久化仓库（JdbcTemplate）：upsert / findById / deleteById / deleteExpired |
+| `erp-api/src/test/java/cn/qihangerp/agent/memory/LayeredMemoryTest.java` | 分层记忆单元测试，10 用例 |
+
+### 变更与说明
+
+- `MemoryManager.java` 重写：Jackson 完整序列化整条记忆（替换手撸、只存 3 字段的写法）、接入 Repository、用 `Objects.equals` 修复租户隔离空指针、写入即脱敏
+- `RagEvaluator.java` 补 `import lombok.Data`，修复 Week4-6 遗留编译硬伤
+- 表结构以 Flyway `V1_13_0` 为权威（记忆键列名为保留字 `` `key` ``）
+- 接手说明：Claude Code 的越界改动已全部备份并回退、被删通知模块已恢复（详见完成报告）
+
+### 验证情况
+
+| 项 | 结果 |
+|----|------|
+| 多模块编译 | BUILD SUCCESS（JDK 21 / Spring Boot 4.1） |
+| LayeredMemoryTest | 10/10 通过 |
+| SESSION/USER/TEAM 接口验证 | 见完成报告第六节手动步骤（需启动 Redis + MySQL） |
+
+> 详见 `docs/Week6-7-Task19-23-分层记忆完成报告.md`
+
+---
+
+## [Week4-6] 2026-10-11 — RAG 检索能力 + 分层记忆骨架
+
+**对应方案进度**：第二阶段 Week4-6「RAG 混合检索、离线评测、记忆骨架」
+**里程碑**：RAG 全套检索 / 引用 / 离线评测代码落地，分层记忆骨架与建表脚本入库
+
+### 新增功能
+
+- **RAG 模块**：`BM25Retriever`、`HybridRetriever`、`Citation`、`CitationGenerator`、`RagController`、`RagResponse`、`RetrievalResult`、`RagEvaluator`、`RagEvaluationMetrics`
+- **分层记忆骨架**：`MemoryLayer`（四层枚举）、`MemoryEntry`、`MemoryManager`、`MemoryController`、`SensitiveDataMasker`
+- **Flyway 迁移**：`V1_12_0__create_agent_rag_tables.sql`、`V1_13_0__create_agent_memory_tables.sql`
+- 独立配置 `application-agent.yml`（待合并）、`docker-compose.yml`
+
+> 详见提交 `2d179a8c` 及 docs 下 Week4-6 完成报告
+
+---
+
 ## [Week2-4] 2026-10-11 — 可信执行边界 + 评测闭环
 
 **对应方案进度**：第一阶段 Week2-3「工具权限与审计系统」+ 第二阶段 Week3-4「评测闭环」
