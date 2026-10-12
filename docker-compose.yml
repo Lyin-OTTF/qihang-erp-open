@@ -1,0 +1,51 @@
+# Docker Compose 配置 - 启航ERP Agent依赖服务
+# 包含：PostgreSQL + PGVector扩展、Redis
+# 使用方式：docker-compose up -d
+
+version: '3.8'
+
+services:
+  # PostgreSQL + PGVector（向量存储）
+  pgvector:
+    image: ankane/pgvector:latest
+    container_name: qihang-erp-pgvector
+    environment:
+      POSTGRES_DB: qihang_erp_rag
+      POSTGRES_USER: qihang
+      POSTGRES_PASSWORD: qihang123456
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qihang"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis（会话记忆 + 分布式锁）
+  redis:
+    image: redis:7-alpine
+    container_name: qihang-erp-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass qihang123456
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "qihang123456", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgvector_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    name: qihang-erp-network

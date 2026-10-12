@@ -1,0 +1,135 @@
+# ============ Spring AI + RAG + 向量存储配置 ============
+# 请将此配置合并到 erp-api/src/main/resources/application.yml
+
+spring:
+  # ============ AI配置 ============
+  ai:
+    # DeepSeek模型配置
+    deepseek:
+      chat:
+        enabled: true
+        base-url: https://api.deepseek.com
+        api-key: ${DEEPSEEK_API_KEY:sk-your-api-key-here}
+        options:
+          model: deepseek-chat
+          temperature: 0.7
+          max-tokens: 2000
+
+    # OpenAI格式API配置（兼容DeepSeek/阿里云百炼/Ollama等）
+    openai:
+      chat:
+        enabled: true
+        base-url: ${OPENAI_BASE_URL:https://api.deepseek.com}
+        api-key: ${OPENAI_API_KEY:sk-your-api-key-here}
+        options:
+          model: ${OPENAI_MODEL:deepseek-chat}
+          temperature: 0.7
+          max-tokens: 2000
+
+      # Embedding模型配置（向量化）
+      embedding:
+        enabled: true
+        base-url: ${OPENAI_BASE_URL:https://api.deepseek.com}
+        api-key: ${OPENAI_API_KEY:sk-your-api-key-here}
+        options:
+          model: ${EMBEDDING_MODEL:text-embedding-ada-002}
+
+    # 向量存储配置（PGVector）
+    vectorstore:
+      pgvector:
+        enabled: true
+        url: jdbc:postgresql://localhost:5432/qihang_erp_rag
+        username: qihang
+        password: qihang123456
+        driver-class-name: org.postgresql.Driver
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: 1536
+        remove-existing-vector-store-table: false
+        initialize-schema: true
+        schema-name: public
+        table-name: vector_store
+
+    # RAG配置
+    rag:
+      retrieval:
+        top-k: 10
+        similarity-threshold: 0.7
+      rerank:
+        enabled: true
+        top-n: 5
+
+  # ============ Redis配置（会话记忆 + 分布式锁）============
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: qihang123456
+      database: 0
+      timeout: 6000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-wait: -1ms
+          max-idle: 8
+          min-idle: 0
+
+  # ============ 数据源配置（支持多数据源）============
+  datasource:
+    # MySQL主数据库（业务数据）
+    primary:
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      url: jdbc:mysql://localhost:3306/qihang_erp?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&serverTimezone=GMT%2B8
+      username: root
+      password: root
+
+    # PostgreSQL向量数据库（RAG知识库）
+    pgvector:
+      driver-class-name: org.postgresql.Driver
+      url: jdbc:postgresql://localhost:5432/qihang_erp_rag
+      username: qihang
+      password: qihang123456
+
+# ============ Redisson配置（分布式锁）============
+redisson:
+  config: |
+    singleServerConfig:
+      address: "redis://127.0.0.1:6379"
+      password: "qihang123456"
+      database: 0
+      connectionPoolSize: 64
+      connectionMinimumIdleSize: 10
+      idleConnectionTimeout: 10000
+      connectTimeout: 10000
+      timeout: 3000
+    threads: 16
+    nettyThreads: 32
+
+# ============ Agent配置 ============
+agent:
+  # 自治等级配置
+  autonomy:
+    default-level: SUGGEST
+    approval-timeout: 300
+
+  # RAG配置
+  rag:
+    retrieval-top-k: 10
+    rerank-enabled: true
+    similarity-threshold: 0.7
+    chunk-size: 500
+    chunk-overlap: 50
+
+  # 记忆配置
+  memory:
+    working-ttl: 3600        # Working层1小时
+    session-ttl: 86400       # Session层1天
+    user-ttl: 2592000        # User层30天
+    team-ttl: 7776000        # Team层90天
+
+  # 评测配置
+  evaluation:
+    enabled: true
+    schedule: "0 0 2 * * SUN"  # 每周日凌晨2点跑评测
+    recall-target: 0.8
+    mrr-target: 0.7
