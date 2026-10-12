@@ -1,33 +1,29 @@
 package cn.qihangerp.agent.memory;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
- * 记忆管理器
+ * 记忆管理器（魔改方案 Week6-7：持久化分层记忆）
  *
- * 四层分级记忆管理：
- * - WORKING: 工作记忆（1小时，内存/Redis）
- * - SESSION: 会话记忆（1天，Redis）
- * - USER: 用户记忆（30天，MySQL）
- * - TEAM: 团队记忆（90天，MySQL）
+ * 四层分级：
+ * - WORKING 工作记忆（1小时，进程内存）
+ * - SESSION 会话记忆（1天，Redis，重启可恢复）
+ * - USER    用户记忆（30天，MySQL 长期 + Redis 缓存）
+ * - TEAM    团队记忆（90天，MySQL 长期 + Redis 缓存，商户内共享）
  *
- * 功能：
- * 1. 存储和读取记忆
- * 2. TTL自动过期
- * 3. 租户隔离
- * 4. 敏感信息脱敏
- * 5. 记忆快照与恢复
+ * 统一保证：写入即脱敏、读取做租户隔离、TTL 自动过期。
  *
- * @author AI Code Generator
+ * @author Doubao
  * @since 2026-10-12
  */
 @Slf4j
@@ -36,153 +32,133 @@ import java.util.stream.Collectors;
 public class MemoryManager {
 
     private final StringRedisTemplate redisTemplate;
-    // MySQL持久化由MemoryRepository负责（稍后实现）
-    // private final MemoryRepository memoryRepository;
+    private final MemoryRepository repository;
 
-    // WORKING层内存缓存（用于极短期记忆）
+    /** WORKING 层进程内缓存 */
     private final ConcurrentHashMap<String, MemoryEntry> workingMemoryCache = new ConcurrentHashMap<>();
 
     /**
+     * 专用 Jackson：完整序列化整条记忆。
+     * findAndRegisterModules 通过 SPI 自动注册 classpath 上的 jackson-datatype-jsr310（runtime 作用域），
+     * 因此编译期无需直接引用 JavaTimeModule，且能正确处理 LocalDateTime。
+     */
+    private final ObjectMapper objectMapper = new ObjectMapper()
+            .findAndRegisterModules()
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+    /**
      * 存储记忆
-     *
-     * @param layer      记忆层
-     * @param scopeId    作用域ID
-     * @param key        记忆键
-     * @param value      记忆值
-     * @param merchantId 商户ID
-     * @param userId     用户ID
      */
     public void store(MemoryLayer layer, String scopeId, String key, String value,
                       Long merchantId, Long userId) {
-        // 创建记忆条目
         MemoryEntry entry = MemoryEntry.create(layer, scopeId, key, value, merchantId, userId);
-
-        // 敏感信息脱敏
+        // 统一脱敏后再落任何介质
         entry.setValue(SensitiveDataMasker.autoMask(value));
 
-        // 根据记忆层选择存储介质
-        if (layer == MemoryLayer.WORKING) {
-            storeToWorkingCache(entry);
-        } else if (layer == MemoryLayer.SESSION) {
-            storeToRedis(entry);
-        } else if (layer == MemoryLayer.USER || layer == MemoryLayer.TEAM) {
-            storeToMySQL(entry);
-            // 同时缓存到Redis提升读取性能
-            storeToRedis(entry);
+        switch (layer) {
+            case WORKING:
+                workingMemoryCache.put(entry.getMemoryId(), entry);
+                break;
+            case SESSION:
+                writeRedis(entry);
+                break;
+            case USER:
+            case TEAM:
+                repository.save(entry);
+                writeRedis(entry);
+                break;
         }
-
-        log.info("记忆已存储: layer={}, scopeId={}, key={}, merchantId={}",
-                layer, scopeId, key, merchantId);
+        log.info("记忆已存储: layer={}, scopeId={}, key={}, merchantId={}", layer, scopeId, key, merchantId);
     }
 
     /**
-     * 读取记忆
-     *
-     * @param layer      记忆层
-     * @param scopeId    作用域ID
-     * @param key        记忆键
-     * @param merchantId 商户ID
-     * @return 记忆值，不存在或已过期返回null
+     * 读取记忆，不存在 / 已过期 / 跨租户均返回 null
      */
     public String retrieve(MemoryLayer layer, String scopeId, String key, Long merchantId) {
-        String memoryId = generateMemoryId(layer, scopeId, key);
+        String memoryId = buildMemoryId(layer, scopeId, key);
+        MemoryEntry entry;
 
-        MemoryEntry entry = null;
-
-        // 优先从缓存读取
-        if (layer == MemoryLayer.WORKING) {
-            entry = workingMemoryCache.get(memoryId);
-        } else {
-            // 从Redis读取
-            entry = retrieveFromRedis(memoryId);
-            // Redis未命中，从MySQL读取
-            if (entry == null && layer.requiresPersistence()) {
-                entry = retrieveFromMySQL(memoryId);
-                // 回写Redis缓存
-                if (entry != null) {
-                    storeToRedis(entry);
+        switch (layer) {
+            case WORKING:
+                entry = workingMemoryCache.get(memoryId);
+                break;
+            case SESSION:
+                entry = readRedis(memoryId);
+                break;
+            case USER:
+            case TEAM:
+                entry = readRedis(memoryId);
+                if (entry == null) {
+                    entry = repository.findById(memoryId);
+                    if (entry != null) {
+                        writeRedis(entry); // 回写缓存
+                    }
                 }
-            }
+                break;
+            default:
+                entry = null;
         }
 
-        // 检查是否过期
         if (entry == null || entry.isExpired()) {
-            log.debug("记忆不存在或已过期: memoryId={}", memoryId);
+            log.debug("记忆不存在或已过期: {}", memoryId);
             return null;
         }
 
-        // 租户隔离检查
-        if (!entry.getMerchantId().equals(merchantId)) {
-            log.warn("租户隔离检查失败: memoryId={}, expected={}, actual={}",
+        // 租户隔离（Objects.equals 避免 merchantId 为 null 时空指针）
+        if (!Objects.equals(entry.getMerchantId(), merchantId)) {
+            log.warn("租户隔离拦截: memoryId={}, expected={}, actual={}",
                     memoryId, merchantId, entry.getMerchantId());
             return null;
         }
 
-        // 更新访问统计
         entry.incrementAccessCount();
-
-        log.debug("记忆已读取: memoryId={}, value={}", memoryId, entry.getValue());
         return entry.getValue();
     }
 
     /**
      * 删除记忆
-     *
-     * @param layer      记忆层
-     * @param scopeId    作用域ID
-     * @param key        记忆键
-     * @param merchantId 商户ID
      */
     public void delete(MemoryLayer layer, String scopeId, String key, Long merchantId) {
-        String memoryId = generateMemoryId(layer, scopeId, key);
-
-        if (layer == MemoryLayer.WORKING) {
-            workingMemoryCache.remove(memoryId);
-        } else if (layer == MemoryLayer.SESSION) {
-            redisTemplate.delete(memoryId);
-        } else if (layer.requiresPersistence()) {
-            deleteFromMySQL(memoryId);
-            redisTemplate.delete(memoryId);
+        String memoryId = buildMemoryId(layer, scopeId, key);
+        switch (layer) {
+            case WORKING:
+                workingMemoryCache.remove(memoryId);
+                break;
+            case SESSION:
+                redisTemplate.delete(memoryId);
+                break;
+            case USER:
+            case TEAM:
+                repository.deleteById(memoryId);
+                redisTemplate.delete(memoryId);
+                break;
         }
-
-        log.info("记忆已删除: memoryId={}", memoryId);
+        log.info("记忆已删除: {}", memoryId);
     }
 
     /**
-     * 列出某个作用域下的所有记忆
-     *
-     * @param layer      记忆层
-     * @param scopeId    作用域ID
-     * @param merchantId 商户ID
-     * @return 记忆键列表
+     * 列出某作用域下的记忆键
      */
     public List<String> listKeys(MemoryLayer layer, String scopeId, Long merchantId) {
-        String pattern = generateMemoryId(layer, scopeId, "*");
-        Set<String> keys;
-
         if (layer == MemoryLayer.WORKING) {
-            keys = workingMemoryCache.keySet().stream()
-                    .filter(k -> k.startsWith(layer.name() + ":" + scopeId + ":"))
-                    .collect(Collectors.toSet());
-        } else {
-            keys = redisTemplate.keys(pattern);
+            String prefix = layer.name() + ":" + scopeId + ":";
+            return workingMemoryCache.keySet().stream()
+                    .filter(k -> k.startsWith(prefix))
+                    .map(k -> k.substring(k.lastIndexOf(":") + 1))
+                    .collect(Collectors.toList());
         }
-
+        String pattern = layer.name() + ":" + scopeId + ":*";
+        Set<String> keys = redisTemplate.keys(pattern);
         if (keys == null) {
             return Collections.emptyList();
         }
-
         return keys.stream()
                 .map(k -> k.substring(k.lastIndexOf(":") + 1))
                 .collect(Collectors.toList());
     }
 
     /**
-     * 清空某个作用域的所有记忆
-     *
-     * @param layer      记忆层
-     * @param scopeId    作用域ID
-     * @param merchantId 商户ID
+     * 清空某作用域全部记忆
      */
     public void clearScope(MemoryLayer layer, String scopeId, Long merchantId) {
         List<String> keys = listKeys(layer, scopeId, merchantId);
@@ -193,133 +169,60 @@ public class MemoryManager {
     }
 
     /**
-     * 清理过期记忆（定时任务调用）
+     * 清理过期记忆（定时任务调用）：WORKING 内存 + MySQL 长期；Redis 靠自身 TTL
      */
     public void cleanupExpiredMemories() {
-        log.info("开始清理过期记忆...");
-
-        // 清理WORKING层内存缓存
-        workingMemoryCache.entrySet().removeIf(entry -> {
-            boolean expired = entry.getValue().isExpired();
-            if (expired) {
-                log.debug("清理过期WORKING记忆: {}", entry.getKey());
-            }
-            return expired;
-        });
-
-        // Redis的TTL自动过期，无需手动清理
-        // MySQL的过期记忆由定时任务清理（agent_memory表的expires_at字段）
-
+        workingMemoryCache.entrySet().removeIf(en -> en.getValue().isExpired());
+        repository.deleteExpired();
         log.info("过期记忆清理完成");
     }
 
-    // ==================== 私有方法 ====================
-
     /**
-     * 存储到WORKING内存缓存
-     */
-    private void storeToWorkingCache(MemoryEntry entry) {
-        workingMemoryCache.put(entry.getMemoryId(), entry);
-    }
-
-    /**
-     * 存储到Redis
-     */
-    private void storeToRedis(MemoryEntry entry) {
-        String json = toJson(entry);
-        redisTemplate.opsForValue().set(
-                entry.getMemoryId(),
-                json,
-                entry.getTtlSeconds(),
-                TimeUnit.SECONDS
-        );
-    }
-
-    /**
-     * 从Redis读取
-     */
-    private MemoryEntry retrieveFromRedis(String memoryId) {
-        String json = redisTemplate.opsForValue().get(memoryId);
-        if (json == null) {
-            return null;
-        }
-        return fromJson(json);
-    }
-
-    /**
-     * 存储到MySQL（占位方法，需要MemoryRepository）
-     */
-    private void storeToMySQL(MemoryEntry entry) {
-        // TODO: 集成MemoryRepository
-        log.debug("存储到MySQL（占位）: memoryId={}", entry.getMemoryId());
-    }
-
-    /**
-     * 从MySQL读取（占位方法）
-     */
-    private MemoryEntry retrieveFromMySQL(String memoryId) {
-        // TODO: 集成MemoryRepository
-        log.debug("从MySQL读取（占位）: memoryId={}", memoryId);
-        return null;
-    }
-
-    /**
-     * 从MySQL删除（占位方法）
-     */
-    private void deleteFromMySQL(String memoryId) {
-        // TODO: 集成MemoryRepository
-        log.debug("从MySQL删除（占位）: memoryId={}", memoryId);
-    }
-
-    /**
-     * 生成记忆ID
-     */
-    private String generateMemoryId(MemoryLayer layer, String scopeId, String key) {
-        return String.format("%s:%s:%s", layer.name(), scopeId, key);
-    }
-
-    /**
-     * 序列化为JSON
-     */
-    private String toJson(MemoryEntry entry) {
-        // 简化实现，生产环境使用Jackson
-        return String.format("{\"memoryId\":\"%s\",\"value\":\"%s\",\"expiresAt\":\"%s\"}",
-                entry.getMemoryId(),
-                entry.getValue().replace("\"", "\\\""),
-                entry.getExpiresAt());
-    }
-
-    /**
-     * 从JSON反序列化
-     */
-    private MemoryEntry fromJson(String json) {
-        // 简化实现，生产环境使用Jackson
-        MemoryEntry entry = new MemoryEntry();
-        // 提取value字段
-        int valueStart = json.indexOf("\"value\":\"") + 9;
-        int valueEnd = json.indexOf("\",\"expiresAt\"");
-        if (valueStart > 9 && valueEnd > valueStart) {
-            entry.setValue(json.substring(valueStart, valueEnd).replace("\\\"", "\""));
-        }
-        return entry;
-    }
-
-    /**
-     * 获取统计信息
+     * 统计信息
      */
     public Map<String, Object> getStatistics() {
         Map<String, Object> stats = new HashMap<>();
         stats.put("workingMemoryCount", workingMemoryCache.size());
-        stats.put("layers", Arrays.stream(MemoryLayer.values())
-                .collect(Collectors.toMap(
-                        MemoryLayer::name,
-                        layer -> Map.of(
-                                "displayName", layer.getDisplayName(),
-                                "defaultTtl", layer.getDefaultTtlSeconds(),
-                                "storage", layer.getStorageMedium()
-                        )
-                )));
+        Map<String, Object> layers = new LinkedHashMap<>();
+        for (MemoryLayer layer : MemoryLayer.values()) {
+            Map<String, Object> info = new LinkedHashMap<>();
+            info.put("displayName", layer.getDisplayName());
+            info.put("defaultTtl", layer.getDefaultTtlSeconds());
+            info.put("storage", layer.getStorageMedium());
+            layers.put(layer.name(), info);
+        }
+        stats.put("layers", layers);
         return stats;
     }
-}
 
+    // ==================== 内部方法 ====================
+
+    private void writeRedis(MemoryEntry entry) {
+        try {
+            String json = objectMapper.writeValueAsString(entry);
+            redisTemplate.opsForValue().set(
+                    entry.getMemoryId(), json,
+                    entry.getTtlSeconds() == null ? 1 : entry.getTtlSeconds(),
+                    TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.error("写入Redis失败: {}", entry.getMemoryId(), e);
+        }
+    }
+
+    private MemoryEntry readRedis(String memoryId) {
+        try {
+            String json = redisTemplate.opsForValue().get(memoryId);
+            if (json == null) {
+                return null;
+            }
+            return objectMapper.readValue(json, MemoryEntry.class);
+        } catch (Exception e) {
+            log.error("读取Redis失败: {}", memoryId, e);
+            return null;
+        }
+    }
+
+    private static String buildMemoryId(MemoryLayer layer, String scopeId, String key) {
+        return String.format("%s:%s:%s", layer.name(), scopeId, key);
+    }
+}
