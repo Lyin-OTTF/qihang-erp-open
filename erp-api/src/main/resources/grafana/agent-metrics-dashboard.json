@@ -1,0 +1,371 @@
+﻿{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "infinity", "uid": "infinity" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "green", "value": 95 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "10.0.0",
+      "targets": [
+        {
+          "datasource": { "type": "infinity", "uid": "infinity" },
+          "type": "json",
+          "source": "url",
+          "url": "http://localhost:6149/api/agent/metrics/global",
+          "root_selector": "successRate"
+        }
+      ],
+      "title": "全局成功率",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "infinity", "uid": "infinity" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 100 },
+              { "color": "red", "value": 500 }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "infinity", "uid": "infinity" },
+          "type": "json",
+          "source": "url",
+          "url": "http://localhost:6149/api/agent/metrics/global",
+          "root_selector": "avgDurationMs"
+        }
+      ],
+      "title": "平均执行耗时",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "infinity", "uid": "infinity" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "blue", "value": null }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "infinity", "uid": "infinity" },
+          "type": "json",
+          "source": "url",
+          "url": "http://localhost:6149/api/agent/metrics/global",
+          "root_selector": "totalCalls"
+        }
+      ],
+      "title": "总调用次数",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "infinity", "uid": "infinity" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": { "type": "infinity", "uid": "infinity" },
+          "type": "json",
+          "source": "url",
+          "url": "http://localhost:6149/api/agent/metrics/global",
+          "root_selector": "totalFailures"
+        }
+      ],
+      "title": "总失败次数",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "infinity", "uid": "infinity" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "infinity", "uid": "infinity" },
+          "type": "json",
+          "source": "url",
+          "url": "http://localhost:6149/api/agent/metrics/tools",
+          "root_selector": "toolMetrics",
+          "columns": [
+            { "selector": "toolName", "text": "Tool" },
+            { "selector": "successCount", "text": "成功" },
+            { "selector": "failureCount", "text": "失败" }
+          ]
+        }
+      ],
+      "title": "各工具调用量（成功/失败）",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "infinity", "uid": "infinity" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "custom": { "align": "auto", "cellOptions": { "type": "color-text" }, "inspect": false },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "green", "value": 95 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "平均耗时(ms)" }, "properties": [{ "id": "unit", "value": "ms" }] },
+          { "matcher": { "id": "byName", "options": "调用次数" }, "properties": [{ "id": "unit", "value": "short" }] }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "infinity", "uid": "infinity" },
+          "type": "json",
+          "source": "url",
+          "url": "http://localhost:6149/api/agent/metrics/tools",
+          "root_selector": "toolMetrics",
+          "columns": [
+            { "selector": "toolName", "text": "工具名称" },
+            { "selector": "category", "text": "分类" },
+            { "selector": "successRate", "text": "成功率(%)" },
+            { "selector": "avgDurationMs", "text": "平均耗时(ms)" },
+            { "selector": "totalCalls", "text": "调用次数" }
+          ]
+        }
+      ],
+      "title": "工具性能明细表",
+      "type": "table"
+    },
+    {
+      "datasource": { "type": "infinity", "uid": "infinity" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "id": 7,
+      "options": {
+        "legend": { "displayMode": "list", "placement": "right", "showLegend": true },
+        "pieType": "donut",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "infinity", "uid": "infinity" },
+          "type": "json",
+          "source": "url",
+          "url": "http://localhost:6149/api/agent/metrics/tools",
+          "root_selector": "toolMetrics",
+          "columns": [
+            { "selector": "toolName", "text": "Tool" },
+            { "selector": "failureCount", "text": "失败数" }
+          ]
+        }
+      ],
+      "title": "失败分布（按工具）",
+      "type": "piechart"
+    },
+    {
+      "datasource": { "type": "infinity", "uid": "infinity" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 200 },
+              { "color": "red", "value": 1000 }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "id": 8,
+      "options": {
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "infinity", "uid": "infinity" },
+          "type": "json",
+          "source": "url",
+          "url": "http://localhost:6149/api/agent/metrics/tools",
+          "root_selector": "toolMetrics",
+          "columns": [
+            { "selector": "toolName", "text": "Tool" },
+            { "selector": "maxDurationMs", "text": "最大耗时" }
+          ]
+        }
+      ],
+      "title": "各工具最大耗时（P99近似）",
+      "type": "bargauge"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["agent", "erp", "metrics"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "启航ERP-Agent运行监控面板",
+  "uid": "qihang-erp-agent-metrics",
+  "version": 1,
+  "weekStart": ""
+}

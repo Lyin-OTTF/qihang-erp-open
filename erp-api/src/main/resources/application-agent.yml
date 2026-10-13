@@ -4,6 +4,11 @@
 spring:
   # ============ AI配置 ============
   ai:
+    # 启用OpenAI兼容的Embedding自动配置（指向DashScope）
+    model:
+      embedding: openai
+
+    # DeepSeek模型配置
     # DeepSeek模型配置
     deepseek:
       chat:
@@ -17,6 +22,9 @@ spring:
 
     # OpenAI格式API配置（兼容DeepSeek/阿里云百炼/Ollama等）
     openai:
+      # 公共凭证层（Embedding自动配置从此读取，chat由DeepSeek starter独立处理）
+      api-key: "sk-ws-H.PPIIPEX.qYvR.MEUCIClNebyu1AbwWikIs_cT3xOlMYvHpr7mIgfWIuN1lq6zAiEAmUWouiaqpBsAYz_h6nSG6RVHPOnKR5HOMbob3KCFlxw"
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
       chat:
         enabled: true
         base-url: ${OPENAI_BASE_URL:https://api.deepseek.com}
@@ -26,25 +34,25 @@ spring:
           temperature: 0.7
           max-tokens: 2000
 
-      # Embedding模型配置（向量化）
+      # Embedding模型配置（向量化，阿里云百炼）
       embedding:
         enabled: true
-        base-url: ${OPENAI_BASE_URL:https://api.deepseek.com}
-        api-key: ${OPENAI_API_KEY:sk-your-api-key-here}
+        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+        api-key: "sk-ws-H.PPIIPEX.qYvR.MEUCIClNebyu1AbwWikIs_cT3xOlMYvHpr7mIgfWIuN1lq6zAiEAmUWouiaqpBsAYz_h6nSG6RVHPOnKR5HOMbob3KCFlxw"
         options:
-          model: ${EMBEDDING_MODEL:text-embedding-ada-002}
+          model: text-embedding-v3
 
-    # 向量存储配置（PGVector）
+    # 向量存储配置（PGVector）——自动配置禁用，由PgVectorManualConfig手动创建
     vectorstore:
       pgvector:
-        enabled: true
-        url: jdbc:postgresql://localhost:5432/qihang_erp_rag
-        username: qihang
-        password: qihang123456
+        enabled: false
+        url: jdbc:postgresql://localhost:5432/erp_vector
+        username: postgres
+        password: "1234"
         driver-class-name: org.postgresql.Driver
         index-type: HNSW
         distance-type: COSINE_DISTANCE
-        dimensions: 1536
+        dimensions: 1024
         remove-existing-vector-store-table: false
         initialize-schema: true
         schema-name: public
@@ -64,7 +72,8 @@ spring:
     redis:
       host: localhost
       port: 6379
-      password: qihang123456
+      # 注意：本机Redis未设置密码，请勿配置password（否则AUTH报错）
+      # password: qihang123456
       database: 0
       timeout: 6000ms
       lettuce:
@@ -86,9 +95,9 @@ spring:
     # PostgreSQL向量数据库（RAG知识库）
     pgvector:
       driver-class-name: org.postgresql.Driver
-      url: jdbc:postgresql://localhost:5432/qihang_erp_rag
-      username: qihang
-      password: qihang123456
+      url: jdbc:postgresql://localhost:5432/erp_vector
+      username: postgres
+      password: "1234"
 
 
 # ============ Agent配置 ============

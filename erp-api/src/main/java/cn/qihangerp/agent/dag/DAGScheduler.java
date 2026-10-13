@@ -56,7 +56,11 @@ public class DAGScheduler {
         Map<String, DAGNode> nodeMap = new LinkedHashMap<>();
         for (DAGNode node : nodes) {
             nodeMap.put(node.getId(), node);
-            context.setNodeStatus(node.getId(), NodeStatus.PENDING);
+            // 恢复模式：若context中已有该节点状态（从Checkpoint恢复），不覆盖；
+            // 否则初始化为PENDING
+            if (!context.getNodeStatuses().containsKey(node.getId())) {
+                context.setNodeStatus(node.getId(), NodeStatus.PENDING);
+            }
         }
 
         // 验证DAG无环

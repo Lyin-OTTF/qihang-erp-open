@@ -14,6 +14,7 @@ import cn.qihangerp.service.msg.ErpOrderMessageService;
 import cn.qihangerp.service.OOrderService;
 import cn.qihangerp.service.ShopGoodsSkuService;
 import cn.qihangerp.service.ShopOrderService;
+import cn.qihangerp.statemachine.TransitionValidator;
 import cn.qihangerp.request.OrderSearchRequest;
 
 import cn.qihangerp.sse.SseService;
@@ -67,6 +68,7 @@ public class OOrderServiceImpl extends ServiceImpl<OOrderMapper, OOrder>
     private final OOrderStockingItemMapper orderStockingItemMapper;
 
     private final SysThirdSystemPushMapper pushMapper;
+    private final TransitionValidator transitionValidator;
 
     /**
      * 统一店铺订单消息
@@ -557,6 +559,15 @@ public class OOrderServiceImpl extends ServiceImpl<OOrderMapper, OOrder>
     public ResultVo<Long> updateOrderStatus(String orderNo, Integer orderStatus, Integer refundStatus) {
         List<OOrder> shopOrders = orderMapper.selectList(new LambdaQueryWrapper<OOrder>().eq(OOrder::getOrderNum, orderNo));
         if (shopOrders != null && shopOrders.size() > 0) {
+            Integer currentStatus = shopOrders.get(0).getOrderStatus();
+            // 状态机校验
+            try {
+                transitionValidator.validateOrderTransition(currentStatus, orderStatus, orderNo);
+            } catch (cn.qihangerp.statemachine.IllegalTransitionException e) {
+                return ResultVo.error("订单状态非法迁移：" +
+                        cn.qihangerp.statemachine.OrderStateMachine.getStateName(currentStatus) + "→" +
+                        cn.qihangerp.statemachine.OrderStateMachine.getStateName(orderStatus));
+            }
             OOrder update = new OOrder();
             update.setId(shopOrders.get(0).getId());
             update.setOrderStatus(orderStatus);
@@ -917,6 +928,8 @@ public class OOrderServiceImpl extends ServiceImpl<OOrderMapper, OOrder>
 
 
         // 更新状态、发货方式
+        // 状态机校验：发货（→已发货）
+        transitionValidator.validateOrderTransition(erpOrder.getOrderStatus(), 2, erpOrder.getOrderNum());
         OOrder update = new OOrder();
         update.setId(erpOrder.getId());
         update.setShipStatus(EnumShipStatus.ALL.getIndex());
@@ -1303,6 +1316,14 @@ public class OOrderServiceImpl extends ServiceImpl<OOrderMapper, OOrder>
         List<OOrder> oOrders = orderMapper.selectList(new LambdaQueryWrapper<OOrder>().eq(OOrder::getOrderNum, douOrderId));
         if (!oOrders.isEmpty()) {
             for (var order : oOrders) {
+                // 状态机校验：平台通知取消（非法时记录但不阻断平台流程）
+                try {
+                    transitionValidator.validateOrderTransition(order.getOrderStatus(), 11, douOrderId);
+                } catch (cn.qihangerp.statemachine.IllegalTransitionException e) {
+                    log.warn("平台取消订单但状态机不允许，记录并继续: orderNum={}, 当前={}",
+                            douOrderId,
+                            cn.qihangerp.statemachine.OrderStateMachine.getStateName(order.getOrderStatus()));
+                }
                 // 取消订单库
                 OOrder update = new OOrder();
                 update.setId(order.getId());

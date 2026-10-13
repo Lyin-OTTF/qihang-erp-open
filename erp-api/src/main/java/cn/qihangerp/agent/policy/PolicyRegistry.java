@@ -70,7 +70,10 @@ public class PolicyRegistry {
                             policy != null && policy.level().allowsWrite(),
                             policy != null && policy.level() == AutonomyLevel.ESCALATE,
                             policy != null ? policy.requiresTenantIsolation() : true,
-                            policy != null ? policy.allowConcurrent() : true
+                            policy != null ? policy.allowConcurrent() : true,
+                            policy != null ? policy.requiresAudit() : true,
+                            policy != null ? policy.maxBatchSize() : 0,
+                            policy != null ? policy.timeoutSeconds() : 0
                     );
                     registry.put(toolName, metadata);
                     count++;
@@ -127,10 +130,14 @@ public class PolicyRegistry {
         private final boolean requiresApproval;
         private final boolean requiresTenantIsolation;
         private final boolean allowConcurrent;
+        private final boolean requiresAudit;
+        private final int maxBatchSize;
+        private final int timeoutSeconds;
 
         public ToolPolicyMetadata(String toolName, AutonomyLevel autonomyLevel, String category,
                                   String description, boolean write, boolean requiresApproval,
-                                  boolean requiresTenantIsolation, boolean allowConcurrent) {
+                                  boolean requiresTenantIsolation, boolean allowConcurrent,
+                                  boolean requiresAudit, int maxBatchSize, int timeoutSeconds) {
             this.toolName = toolName;
             this.autonomyLevel = autonomyLevel;
             this.category = category;
@@ -139,6 +146,9 @@ public class PolicyRegistry {
             this.requiresApproval = requiresApproval;
             this.requiresTenantIsolation = requiresTenantIsolation;
             this.allowConcurrent = allowConcurrent;
+            this.requiresAudit = requiresAudit;
+            this.maxBatchSize = maxBatchSize;
+            this.timeoutSeconds = timeoutSeconds;
         }
 
         public String getToolName() { return toolName; }
@@ -149,5 +159,8 @@ public class PolicyRegistry {
         public boolean isRequiresApproval() { return requiresApproval; }
         public boolean isRequiresTenantIsolation() { return requiresTenantIsolation; }
         public boolean isAllowConcurrent() { return allowConcurrent; }
+        public boolean isRequiresAudit() { return requiresAudit; }
+        public int getMaxBatchSize() { return maxBatchSize; }
+        public int getTimeoutSeconds() { return timeoutSeconds; }
     }
 }

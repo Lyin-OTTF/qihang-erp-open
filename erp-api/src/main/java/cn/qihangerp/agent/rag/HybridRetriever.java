@@ -1,7 +1,7 @@
 package cn.qihangerp.agent.rag;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -17,6 +17,8 @@ import java.util.stream.Collectors;
  * 2. 使用RRF算法融合两个排序列表
  * 3. 返回Top-K结果
  *
+ * 向量检索三级降级：PGVector(真向量语义) → MySQL FULLTEXT(全文相关性) → 空列表(纯BM25)
+ *
  * RRF公式：
  * RRF_score(chunk) = sum(1 / (k + rank_i))
  * 其中 rank_i 是chunk在第i个排序列表中的排名，k是常数（默认60）
@@ -26,7 +28,6 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class HybridRetriever {
 
     // RRF常数k（论文推荐值为60）
@@ -37,6 +38,23 @@ public class HybridRetriever {
 
     // MySQL全文检索器（PGVector不可用时的降级方案）
     private final MysqlFullTextRetriever mysqlFullTextRetriever;
+
+    // PGVector向量检索器（可选，配置后自动启用）
+    private final PgVectorRetriever pgVectorRetriever;
+
+    @Autowired
+    public HybridRetriever(BM25Retriever bm25Retriever,
+                           MysqlFullTextRetriever mysqlFullTextRetriever,
+                           @Autowired(required = false) PgVectorRetriever pgVectorRetriever) {
+        this.bm25Retriever = bm25Retriever;
+        this.mysqlFullTextRetriever = mysqlFullTextRetriever;
+        this.pgVectorRetriever = pgVectorRetriever;
+    }
+
+    /** 兼容构造函数（PGVector未配置时使用） */
+    public HybridRetriever(BM25Retriever bm25Retriever, MysqlFullTextRetriever mysqlFullTextRetriever) {
+        this(bm25Retriever, mysqlFullTextRetriever, null);
+    }
 
     /**
      * 混合检索
@@ -79,13 +97,19 @@ public class HybridRetriever {
     /**
      * 向量检索（语义相似）
      *
-     * <p>三级降级链路：PGVector(向量语义) → MySQL FULLTEXT(全文相关性) → 空列表(纯BM25)</p>
-     *
-     * <p>当前PGVector/EmbeddingModel未配置，使用MySQL全文索引（ngram分词器）
-     * 作为语义检索降级方案。MySQL全文检索失败时返回空列表，RRF融合自动降级为纯BM25。</p>
+     * <p>三级降级链路：PGVector(真向量语义) → MySQL FULLTEXT(全文相关性) → 空列表(纯BM25)</p>
      */
     private List<RetrievalResult> retrieveByVector(String query, int topK, Long merchantId) {
-        // 优先使用MySQL全文检索作为PGVector的降级方案
+        // 一级：PGVector真向量检索
+        if (pgVectorRetriever != null && pgVectorRetriever.isAvailable()) {
+            List<RetrievalResult> pgResults = pgVectorRetriever.retrieve(query, topK, merchantId);
+            if (!pgResults.isEmpty()) {
+                log.debug("PGVector向量检索召回{}个结果", pgResults.size());
+                return pgResults;
+            }
+        }
+
+        // 二级：MySQL全文检索降级
         if (mysqlFullTextRetriever != null && mysqlFullTextRetriever.isAvailable()) {
             List<RetrievalResult> ftResults = mysqlFullTextRetriever.retrieve(query, topK, merchantId);
             if (!ftResults.isEmpty()) {
@@ -93,7 +117,8 @@ public class HybridRetriever {
                 return ftResults;
             }
         }
-        // MySQL全文检索不可用或无结果，返回空列表，混合检索降级为BM25-only
+
+        // 三级：均不可用，返回空列表，混合检索降级为BM25-only
         log.debug("向量检索/全文检索均无结果，降级为BM25-only: query={}", query);
         return Collections.emptyList();
     }
