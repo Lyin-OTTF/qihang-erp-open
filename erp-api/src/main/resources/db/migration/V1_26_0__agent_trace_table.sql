@@ -1,0 +1,30 @@
+-- V1_26_0: Agent调用Trace集中存储表
+-- 用于记录AI Agent每次工具调用的完整链路追踪，支持按traceId/spanId查询
+CREATE TABLE IF NOT EXISTS `agent_trace` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `trace_id` VARCHAR(64) NOT NULL COMMENT '链路追踪ID（一次对话唯一）',
+    `span_id` VARCHAR(64) NOT NULL COMMENT '跨度ID（单次工具调用唯一）',
+    `parent_span_id` VARCHAR(64) DEFAULT NULL COMMENT '父跨度ID',
+    `merchant_id` BIGINT DEFAULT NULL COMMENT '商户ID（租户隔离）',
+    `user_id` BIGINT DEFAULT NULL COMMENT '用户ID',
+    `tool_name` VARCHAR(128) NOT NULL COMMENT '工具名称',
+    `tool_category` VARCHAR(64) DEFAULT NULL COMMENT '工具分类',
+    `action` VARCHAR(32) DEFAULT 'EXECUTE' COMMENT '动作类型: EXECUTE/SUCCESS/FAILURE/APPROVAL',
+    `input_params` TEXT DEFAULT NULL COMMENT '输入参数（JSON）',
+    `output_result` TEXT DEFAULT NULL COMMENT '输出结果（JSON，截断）',
+    `error_type` VARCHAR(64) DEFAULT NULL COMMENT '错误类型',
+    `error_message` TEXT DEFAULT NULL COMMENT '错误信息',
+    `duration_ms` BIGINT DEFAULT 0 COMMENT '执行耗时（毫秒）',
+    `status` VARCHAR(20) DEFAULT 'RUNNING' COMMENT '状态: RUNNING/SUCCESS/FAILURE/APPROVAL_REQUIRED',
+    `autonomy_level` VARCHAR(20) DEFAULT NULL COMMENT '自主等级: LOW/MEDIUM/HIGH/CRITICAL',
+    `idempotency_key` VARCHAR(128) DEFAULT NULL COMMENT '幂等键',
+    `lock_key` VARCHAR(128) DEFAULT NULL COMMENT '分布式锁key',
+    `metadata` TEXT DEFAULT NULL COMMENT '扩展元数据（JSON）',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    INDEX `idx_trace_id` (`trace_id`),
+    INDEX `idx_merchant_tool` (`merchant_id`, `tool_name`),
+    INDEX `idx_status_created` (`status`, `created_at`),
+    INDEX `idx_span_id` (`span_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Agent调用Trace集中存储表';

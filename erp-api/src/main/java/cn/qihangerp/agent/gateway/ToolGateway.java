@@ -6,7 +6,10 @@ import cn.qihangerp.agent.approval.ApprovalRequest;
 import cn.qihangerp.agent.approval.ApprovalService;
 import cn.qihangerp.agent.evaluation.MetricsCollector;
 import cn.qihangerp.agent.policy.AutonomyLevel;
+import cn.qihangerp.agent.policy.PolicyRegistry;
 import cn.qihangerp.agent.policy.ToolPolicy;
+import cn.qihangerp.agent.trace.TraceEntry;
+import cn.qihangerp.agent.trace.TraceService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -41,8 +44,20 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class ToolGateway {
 
-    // 并发控制：Tool方法名 -> 是否正在执行
+    // 并发控制：Tool方法名 -> 是否正在执行（内存锁，作为Redis不可用时的降级）
     private final ConcurrentHashMap<String, Boolean> executionLocks = new ConcurrentHashMap<>();
+
+    // 分布式锁（Redis，多实例部署时保证互斥；不可用时自动降级为内存锁）
+    @Autowired(required = false)
+    private DistributedLockService distributedLockService;
+
+    // 幂等性守护（Redis，防止写操作重复执行；仅对写工具生效）
+    @Autowired(required = false)
+    private IdempotencyGuard idempotencyGuard;
+
+    // 策略注册表（启动时扫描所有@Tool方法的策略，优先于反射读取）
+    @Autowired(required = false)
+    private PolicyRegistry policyRegistry;
 
     // 指标收集器（可选依赖，如果不存在不影响核心功能）
     @Autowired(required = false)
@@ -55,6 +70,10 @@ public class ToolGateway {
     // 审批服务（可选依赖，用于ESCALATE级别人工审批）
     @Autowired(required = false)
     private ApprovalService approvalService;
+
+    // Trace集中存储（可选依赖，记录工具调用链路）
+    @Autowired(required = false)
+    private TraceService traceService;
 
     /**
      * 执行Tool方法（核心入口）
@@ -72,6 +91,9 @@ public class ToolGateway {
 
         long startTime = System.currentTimeMillis();
         String toolName = toolInstance.getClass().getSimpleName() + "." + methodName;
+        DistributedLockService.LockHandle distLockHandle = null;
+        String idempotencyKey = null;
+        TraceEntry traceEntry = null;
 
         try {
             // 步骤1: 查找Tool方法
@@ -82,12 +104,22 @@ public class ToolGateway {
                 throw new ToolExecutionException(errorMsg);
             }
 
-            // 步骤2: 获取ToolPolicy注解
-            ToolPolicy policy = method.getAnnotation(ToolPolicy.class);
-            if (policy == null) {
-                log.warn("Tool方法[{}]缺少@ToolPolicy注解，使用默认OBSERVE策略", toolName);
-                // 缺少注解时，默认只允许OBSERVE级别
-                policy = createDefaultPolicy();
+            // 步骤2: 获取ToolPolicy（优先从PolicyRegistry注册表，降级为反射注解，最后默认策略）
+            ToolPolicy policy = resolvePolicy(toolName, method);
+
+            // 步骤2.5: 记录Trace开始
+            if (traceService != null) {
+                try {
+                    String inputJson = args != null && args.length > 0
+                            ? java.util.Arrays.toString(args) : "[]";
+                    traceEntry = traceService.recordStart(
+                            context.getTraceId(), toolName, policy.category(),
+                            context.getMerchantId(), context.getUserId(), inputJson,
+                            policy.level() != null ? policy.level().name() : null,
+                            null, null);
+                } catch (Exception traceEx) {
+                    log.warn("Trace记录开始失败: {}", traceEx.getMessage());
+                }
             }
 
             // 步骤3: 权限检查
@@ -100,12 +132,39 @@ public class ToolGateway {
                 log.warn("Tool[{}]未携带租户ID，跳过强制租户隔离（向后兼容），工具层将按无租户处理", toolName);
             }
 
-            // 步骤5: 并发控制
+            // 步骤4.5: 幂等性检查（仅对写操作工具生效，防止AI重复调用导致重复写）
+            if (policy.level() != null && policy.level().allowsWrite() && idempotencyGuard != null) {
+                IdempotencyGuard.IdempotencyResult idemResult = idempotencyGuard.checkAndMark(
+                        context.getMerchantId(), context.getUserId(), toolName, args);
+                if (idemResult.isDuplicate()) {
+                    if (idemResult.isProcessing()) {
+                        String errorMsg = "写操作正在执行中，请勿重复提交: " + toolName;
+                        log.warn(errorMsg);
+                        throw new ToolExecutionException(errorMsg);
+                    } else {
+                        // 已完成过相同参数的写操作，直接返回幂等命中提示
+                        log.info("幂等命中（已完成）: tool={}, 结果摘要={}", toolName, idemResult.getCachedResult());
+                        return "操作已执行过（幂等命中），无需重复执行。上次结果摘要: " + idemResult.getCachedResult();
+                    }
+                }
+                idempotencyKey = idemResult.getIdempotencyKey();
+            }
+
+            // 步骤5: 并发控制（优先Redis分布式锁，降级为内存锁）
             if (!policy.allowConcurrent()) {
-                if (!acquireLock(toolName)) {
-                    String errorMsg = "Tool正在执行中，不允许并发调用: " + toolName;
-                    log.warn(errorMsg);
-                    throw new ToolExecutionException(errorMsg);
+                if (distributedLockService != null) {
+                    distLockHandle = distributedLockService.tryLock("tool:" + toolName, 30);
+                    if (!distLockHandle.isAcquired()) {
+                        String errorMsg = "Tool正在执行中（分布式锁占用），不允许并发调用: " + toolName;
+                        log.warn(errorMsg);
+                        throw new ToolExecutionException(errorMsg);
+                    }
+                } else {
+                    if (!acquireLock(toolName)) {
+                        String errorMsg = "Tool正在执行中，不允许并发调用: " + toolName;
+                        log.warn(errorMsg);
+                        throw new ToolExecutionException(errorMsg);
+                    }
                 }
             }
 
@@ -149,6 +208,17 @@ public class ToolGateway {
                 recordAuditLog(toolName, policy, context, args, result, true, null, startTime);
             }
 
+            // 步骤8.5: 标记幂等完成（写操作）
+            if (idempotencyKey != null && idempotencyGuard != null) {
+                try {
+                    String resultDigest = result != null ? result.toString() : "null";
+                    if (resultDigest.length() > 200) resultDigest = resultDigest.substring(0, 200);
+                    idempotencyGuard.complete(idempotencyKey, resultDigest);
+                } catch (Exception e) {
+                    log.warn("标记幂等完成失败: {}", e.getMessage());
+                }
+            }
+
             long duration = System.currentTimeMillis() - startTime;
             log.info("Tool[{}]执行成功，耗时{}ms", toolName, duration);
 
@@ -168,10 +238,27 @@ public class ToolGateway {
                 metricsCollector.recordSuccess(toolName, policy.category(), duration, context.getMerchantId());
             }
 
+            // 记录Trace成功
+            if (traceEntry != null && traceService != null) {
+                try {
+                    String resultStr = result != null ? result.toString() : "null";
+                    traceService.recordSuccess(traceEntry, resultStr, duration);
+                } catch (Exception traceEx) {
+                    log.warn("Trace记录成功失败: {}", traceEx.getMessage());
+                }
+            }
+
             return result;
 
         } catch (ApprovalRequiredException e) {
-            // 人工确认异常，向上抛出
+            // 人工确认异常：操作未实际执行，清除幂等标记以便审批通过后重试
+            if (idempotencyKey != null && idempotencyGuard != null) {
+                try { idempotencyGuard.fail(idempotencyKey); } catch (Exception ex) { log.warn("清除幂等标记失败: {}", ex.getMessage()); }
+            }
+            // 记录Trace审批状态
+            if (traceEntry != null && traceService != null) {
+                try { traceService.recordApprovalRequired(traceEntry, e.getMessage()); } catch (Exception ex) { log.warn("Trace审批记录失败: {}", ex.getMessage()); }
+            }
             throw e;
 
         } catch (Exception e) {
@@ -208,10 +295,28 @@ public class ToolGateway {
                 log.error("记录审计日志失败: {}", auditEx.getMessage());
             }
 
+            // 执行失败，清除幂等标记（允许重试）
+            if (idempotencyKey != null && idempotencyGuard != null) {
+                try { idempotencyGuard.fail(idempotencyKey); } catch (Exception ex) { log.warn("清除幂等标记失败: {}", ex.getMessage()); }
+            }
+
+            // 记录Trace失败
+            if (traceEntry != null && traceService != null) {
+                try { traceService.recordFailure(traceEntry, errorType, actualError.getMessage(), duration); } catch (Exception ex) { log.warn("Trace失败记录失败: {}", ex.getMessage()); }
+            }
+
             throw new ToolExecutionException("Tool执行失败: " + toolName, e);
 
         } finally {
-            // 释放并发锁
+            // 释放分布式锁（如果获取了）
+            if (distLockHandle != null && distLockHandle.isAcquired() && distributedLockService != null) {
+                try {
+                    distributedLockService.unlock(distLockHandle);
+                } catch (Exception e) {
+                    log.warn("释放分布式锁失败: {}", e.getMessage());
+                }
+            }
+            // 释放内存锁（降级路径）
             executionLocks.remove(toolName);
         }
     }
@@ -316,6 +421,55 @@ public class ToolGateway {
         } catch (Exception e) {
             log.error("记录审计日志失败（不影响业务）: tool={}, error={}", toolName, e.getMessage());
         }
+    }
+
+    /**
+     * 解析工具策略：优先从 PolicyRegistry 获取，降级为反射注解，最后用默认策略。
+     */
+    private ToolPolicy resolvePolicy(String toolName, Method method) {
+        // 1. 优先从策略注册表获取（启动时扫描的统一策略源）
+        if (policyRegistry != null) {
+            PolicyRegistry.ToolPolicyMetadata metadata = policyRegistry.getPolicy(toolName);
+            if (metadata != null) {
+                log.debug("策略从PolicyRegistry获取: {}", toolName);
+                return policyFromMetadata(metadata);
+            }
+        }
+        // 2. 降级为反射读取注解
+        ToolPolicy policy = method.getAnnotation(ToolPolicy.class);
+        if (policy != null) {
+            log.warn("Tool[{}]未在PolicyRegistry中注册，使用反射注解策略", toolName);
+            return policy;
+        }
+        // 3. 最后用默认策略
+        log.warn("Tool方法[{}]缺少@ToolPolicy注解，使用默认OBSERVE策略", toolName);
+        return createDefaultPolicy();
+    }
+
+    /**
+     * 从 PolicyRegistry 元数据构造 ToolPolicy 匿名实现
+     */
+    private ToolPolicy policyFromMetadata(PolicyRegistry.ToolPolicyMetadata md) {
+        return new ToolPolicy() {
+            @Override
+            public Class<? extends java.lang.annotation.Annotation> annotationType() { return ToolPolicy.class; }
+            @Override
+            public AutonomyLevel level() { return md.getAutonomyLevel(); }
+            @Override
+            public String category() { return md.getCategory(); }
+            @Override
+            public String description() { return md.getDescription(); }
+            @Override
+            public boolean requiresTenantIsolation() { return md.isRequiresTenantIsolation(); }
+            @Override
+            public boolean requiresAudit() { return md.isRequiresAudit(); }
+            @Override
+            public int maxBatchSize() { return md.getMaxBatchSize(); }
+            @Override
+            public int timeoutSeconds() { return md.getTimeoutSeconds(); }
+            @Override
+            public boolean allowConcurrent() { return md.isAllowConcurrent(); }
+        };
     }
 
     /**

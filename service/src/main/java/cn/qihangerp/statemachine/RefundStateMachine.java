@@ -1,4 +1,4 @@
-package cn.qihangerp.agent.statemachine;
+package cn.qihangerp.statemachine;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -10,7 +10,7 @@ import java.util.Set;
  *
  * <p>定义 ShopRefund.status 的合法状态迁移规则。</p>
  *
- * <p>状态编码（来自 ShopRefund 实体注释）：
+ * <p>状态编码：
  * <ul>
  *   <li>0 售后申请</li>
  *   <li>1 售后关闭</li>
@@ -23,8 +23,8 @@ import java.util.Set;
  * </ul>
  * </p>
  *
- * @author 回溯开发-搁置项攻关
- * @since 2026-10-12
+ * @author 状态机下沉
+ * @since 2026-10-13
  */
 public class RefundStateMachine {
 
@@ -43,20 +43,12 @@ public class RefundStateMachine {
     private static final Map<Integer, Set<Integer>> TRANSITIONS = new HashMap<>();
 
     static {
-        // 售后申请 → 售后处理中/售后关闭/平台处理中
         addTransition(0, 2, 1, 8);
-        // 售后处理中 → 退款中/待买家发货/待用户处理/售后关闭/平台处理中
         addTransition(2, 3, 6, 5, 1, 8);
-        // 待买家发货 → 售后处理中/售后关闭
         addTransition(6, 2, 1);
-        // 待用户处理 → 售后处理中/售后关闭
         addTransition(5, 2, 1);
-        // 退款中 → 售后成功/售后关闭/售后处理中
         addTransition(3, 4, 1, 2);
-        // 平台处理中 → 售后处理中/退款中/售后关闭/售后成功
         addTransition(8, 2, 3, 1, 4);
-        // 售后成功 → （终态）
-        // 售后关闭 → （终态）
     }
 
     private static void addTransition(int from, int... toStates) {
@@ -86,7 +78,7 @@ public class RefundStateMachine {
 
     public static boolean isTerminal(Integer state) {
         if (state == null) return false;
-        return state == 4 || state == 1; // 售后成功、售后关闭
+        return state == 4 || state == 1;
     }
 
     public static String getStateName(Integer state) {

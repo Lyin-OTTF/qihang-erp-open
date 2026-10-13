@@ -11,6 +11,7 @@ import cn.qihangerp.model.bo.RefundProcessingBo;
 import cn.qihangerp.model.bo.RefundSearchBo;
 import cn.qihangerp.service.ORefundService;
 import cn.qihangerp.service.ShopGoodsSkuService;
+import cn.qihangerp.statemachine.TransitionValidator;
 import com.alibaba.fastjson2.JSONObject;
 import com.alibaba.fastjson2.util.DateUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -53,6 +54,7 @@ public class ORefundServiceImpl extends ServiceImpl<ORefundMapper, ORefund>
     private final ErpWarehouseMapper erpWarehouseMapper;
     private final ErpSupplierMapper goodsSupplierMapper;
     private final ShopRefundMapper shopRefundMapper;
+    private final TransitionValidator transitionValidator;
 
 //    private final PddApiService pddApiService;
 //    private final TaoApiService taoApiService;
@@ -2166,6 +2168,9 @@ public class ORefundServiceImpl extends ServiceImpl<ORefundMapper, ORefund>
             updateRefund.setProcessType(processingBo.getType());
 //            updateRefund.setStatus(10010);
             updateRefund.setStatus(4);
+            // 管理型完结（记录不拦截），并入 Trace 监视
+            transitionValidator.recordAdministrativeRefundTransition(
+                    refund.getStatus(), 4, refund.getRefundNum());
             updateRefund.setUpdateBy("管理员操作");
             updateRefund.setUpdateTime(LocalDateTime.now());
             mapper.updateById(updateRefund);

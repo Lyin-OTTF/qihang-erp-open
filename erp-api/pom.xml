@@ -141,6 +141,11 @@
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-openai</artifactId>
         </dependency>
+        <!-- OpenAI自动配置（提供EmbeddingModel自动装配，支持DashScope兼容端点） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-autoconfigure-model-openai</artifactId>
+        </dependency>
         <!-- JSON-B 实现（Spring AI 依赖 Jakarta JSON-B） -->
         <dependency>
             <groupId>org.eclipse</groupId>
@@ -159,6 +164,13 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- ============ Redisson 分布式锁（核心库，手动配置，与Lettuce共存）============ -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson</artifactId>
+            <version>4.7.0</version>
         </dependency>
 
         <!-- ============ PostgreSQL驱动（PGVector向量存储）============ -->

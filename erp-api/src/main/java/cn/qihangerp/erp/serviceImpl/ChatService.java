@@ -1,5 +1,7 @@
 package cn.qihangerp.erp.serviceImpl;
 
+import cn.qihangerp.agent.memory.MemoryLayer;
+import cn.qihangerp.agent.memory.MemoryManager;
 import cn.qihangerp.agent.tenant.TenantContext;
 import cn.qihangerp.erp.serviceImpl.ai.AiOrchestrationService;
 import cn.qihangerp.erp.serviceImpl.ai.GoodsTools;
@@ -41,6 +43,7 @@ public class ChatService {
 
     private final AiConversationHistoryService historyService;
     private final AiOrchestrationService orchestrationService;
+    private final MemoryManager memoryManager;
     private final GoodsTools goodsTools;
     private final OrderTools orderTools;
     private final RefundTools refundTools;
@@ -61,12 +64,77 @@ public class ChatService {
             由你自行对数据进行分组、排序、统计、对比，得出结论。
             """;
 
+    /**
+     * 从记忆系统读取上下文，注入到系统提示中。
+     * 读取顺序：TEAM（商户共享）→ USER（用户偏好）→ SESSION（当前会话）
+     */
+    private String buildMemoryContext(String sessionId, Long userId, Long merchantId) {
+        StringBuilder ctx = new StringBuilder();
+        try {
+            // TEAM层：商户/团队共享知识
+            if (merchantId != null) {
+                List<String> teamKeys = memoryManager.listKeys(MemoryLayer.TEAM, merchantId.toString(), merchantId);
+                for (String key : teamKeys) {
+                    String val = memoryManager.retrieve(MemoryLayer.TEAM, merchantId.toString(), key, merchantId);
+                    if (val != null) ctx.append("- 团队知识[").append(key).append("]: ").append(val).append("\n");
+                }
+            }
+            // USER层：用户个人偏好/习惯
+            if (userId != null) {
+                List<String> userKeys = memoryManager.listKeys(MemoryLayer.USER, userId.toString(), merchantId);
+                for (String key : userKeys) {
+                    String val = memoryManager.retrieve(MemoryLayer.USER, userId.toString(), key, merchantId);
+                    if (val != null) ctx.append("- 用户偏好[").append(key).append("]: ").append(val).append("\n");
+                }
+            }
+            // SESSION层：当前会话上下文（重启可恢复）
+            if (sessionId != null) {
+                List<String> sessionKeys = memoryManager.listKeys(MemoryLayer.SESSION, sessionId, merchantId);
+                for (String key : sessionKeys) {
+                    String val = memoryManager.retrieve(MemoryLayer.SESSION, sessionId, key, merchantId);
+                    if (val != null) ctx.append("- 会话记忆[").append(key).append("]: ").append(val).append("\n");
+                }
+            }
+        } catch (Exception e) {
+            log.warn("读取记忆上下文失败（不影响对话）: {}", e.getMessage());
+        }
+        return ctx.toString();
+    }
+
+    /**
+     * 将本轮对话关键信息保存到SESSION层记忆（Redis，1天TTL，重启可恢复）
+     */
+    private void saveSessionMemory(String sessionId, Long userId, Long merchantId, String userMsg, String assistantReply) {
+        try {
+            String key = "turn_" + System.currentTimeMillis();
+            String value = "用户问: " + truncate(userMsg, 200) + " | 助手答: " + truncate(assistantReply, 300);
+            memoryManager.store(MemoryLayer.SESSION, sessionId, key, value, merchantId, userId);
+        } catch (Exception e) {
+            log.warn("保存会话记忆失败（不影响对话）: {}", e.getMessage());
+        }
+    }
+
+    private String truncate(String s, int max) {
+        if (s == null) return "";
+        return s.length() > max ? s.substring(0, max) + "..." : s;
+    }
+
     public void streamResponse(AiConfig config, SseEmitter emitter, String sessionId, Long userId) {
         try {
             List<AiConversationHistory> history = historyService.getConversation(sessionId);
 
+            // 在请求线程上读取租户ID（由 TenantInterceptor 从 Header/参数注入）
+            Long merchantId = TenantContext.getTenantId();
+
+            // 读取记忆上下文，注入到系统提示
+            String memoryContext = buildMemoryContext(sessionId, userId, merchantId);
+            String enhancedSystemPrompt = SYSTEM_PROMPT;
+            if (memoryContext != null && !memoryContext.isEmpty()) {
+                enhancedSystemPrompt = SYSTEM_PROMPT + "\n\n【已知记忆上下文】\n" + memoryContext;
+            }
+
             List<Message> messages = new ArrayList<>();
-            messages.add(new SystemMessage(SYSTEM_PROMPT));
+            messages.add(new SystemMessage(enhancedSystemPrompt));
             for (AiConversationHistory msg : history) {
                 if ("user".equals(msg.getRole())) {
                     messages.add(new UserMessage(msg.getContent()));
@@ -75,9 +143,7 @@ public class ChatService {
                 }
             }
 
-            // 在请求线程上读取租户ID（由 TenantInterceptor 从 Header/参数注入），
             // 生成 traceId，一并放入 toolContext，随 ChatClient 透传到每次工具调用
-            Long merchantId = TenantContext.getTenantId();
             String traceId = UUID.randomUUID().toString();
             Map<String, Object> toolContext = new HashMap<>();
             toolContext.put("merchantId", merchantId);
@@ -110,6 +176,13 @@ public class ChatService {
                                 String reply = fullResponse.toString();
                                 if (!reply.isEmpty()) {
                                     historyService.saveMessage(sessionId, userId, "assistant", reply);
+                                    // 保存本轮对话到SESSION层记忆（Redis，重启可恢复）
+                                    String lastUserMsg = history.stream()
+                                            .filter(m -> "user".equals(m.getRole()))
+                                            .reduce((first, second) -> second)
+                                            .map(AiConversationHistory::getContent)
+                                            .orElse("");
+                                    saveSessionMemory(sessionId, userId, merchantId, lastUserMsg, reply);
                                 }
                                 sendJsonEvent(emitter, "done", "");
                                 safeComplete(emitter);

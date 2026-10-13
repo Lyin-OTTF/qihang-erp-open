@@ -1,11 +1,14 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.statemachine.TransitionValidator;
 import cn.qihangerp.agent.tenant.TenantContext;
 import cn.qihangerp.model.entity.ShopOrder;
 import cn.qihangerp.service.ShopOrderService;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEvent;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.lang.reflect.Proxy;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -33,6 +36,16 @@ class OrderActionToolsTest {
     @AfterEach
     void tearDown() {
         TenantContext.clear();
+    }
+
+    /** 构造带 no-op 事件发布器的校验器 */
+    private TransitionValidator newValidator() {
+        return new TransitionValidator(new ApplicationEventPublisher() {
+            @Override
+            public void publishEvent(ApplicationEvent event) { }
+            @Override
+            public void publishEvent(Object event) { }
+        });
     }
 
     /**
@@ -72,7 +85,7 @@ class OrderActionToolsTest {
         AtomicBoolean updateCalled = new AtomicBoolean(false);
         ShopOrderService mockSvc = mockService(existing, true, captured, updateCalled);
 
-        OrderActionTools tools = new OrderActionTools(mockSvc);
+        OrderActionTools tools = new OrderActionTools(mockSvc, newValidator());
         TenantContext.setTenantId(500L);
 
         String result = tools.updateOrderSellerMemo(100L, "新的商家备注");
@@ -102,7 +115,7 @@ class OrderActionToolsTest {
         // getOne 返回 null（因为 wrapper 中加了 merchant_id=999 条件，查不到）
         ShopOrderService mockSvc = mockService(null, true, captured, updateCalled);
 
-        OrderActionTools tools = new OrderActionTools(mockSvc);
+        OrderActionTools tools = new OrderActionTools(mockSvc, newValidator());
         TenantContext.setTenantId(999L);
 
         String result = tools.updateOrderSellerMemo(100L, "恶意修改备注");
@@ -121,7 +134,7 @@ class OrderActionToolsTest {
         AtomicBoolean updateCalled = new AtomicBoolean(false);
         ShopOrderService mockSvc = mockService(existing, false, captured, updateCalled);
 
-        OrderActionTools tools = new OrderActionTools(mockSvc);
+        OrderActionTools tools = new OrderActionTools(mockSvc, newValidator());
         TenantContext.setTenantId(500L);
 
         String result = tools.updateOrderSellerMemo(100L, "备注");
@@ -140,7 +153,7 @@ class OrderActionToolsTest {
         AtomicBoolean updateCalled = new AtomicBoolean(false);
         ShopOrderService mockSvc = mockService(existing, true, captured, updateCalled);
 
-        OrderActionTools tools = new OrderActionTools(mockSvc);
+        OrderActionTools tools = new OrderActionTools(mockSvc, newValidator());
         // 不设置 TenantContext
 
         String result = tools.updateOrderSellerMemo(100L, "无租户备注");

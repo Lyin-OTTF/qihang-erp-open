@@ -10,12 +10,16 @@ import cn.qihangerp.model.entity.*;
 import cn.qihangerp.model.request.SaleOrderAfterAddRequest;
 import cn.qihangerp.service.ShopRefundService;
 import cn.qihangerp.service.OShopService;
+import cn.qihangerp.statemachine.TransitionValidator;
+import cn.qihangerp.statemachine.IllegalTransitionException;
+import cn.qihangerp.statemachine.RefundStateMachine;
 import com.alibaba.fastjson2.util.DateUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -32,6 +36,7 @@ import java.util.List;
 * @description 针对表【oms_shop_refund(视频号小店退款)】的数据库操作Service实现
 * @createDate 2025-07-15 12:25:58
 */
+@Slf4j
 @AllArgsConstructor
 @Service
 public class ShopRefundServiceImpl extends ServiceImpl<ShopRefundMapper, ShopRefund>
@@ -40,6 +45,7 @@ public class ShopRefundServiceImpl extends ServiceImpl<ShopRefundMapper, ShopRef
     private final ShopOrderItemMapper shopOrderItemMapper;
     private final ShopOrderMapper shopOrderMapper;
     private final OOrderItemMapper orderItemMapper;
+    private final TransitionValidator transitionValidator;
     private final OOrderMapper orderMapper;
 
     @Override
@@ -87,6 +93,33 @@ public class ShopRefundServiceImpl extends ServiceImpl<ShopRefundMapper, ShopRef
         );
         if (shopRefundList != null && shopRefundList.size() > 0) {
             // 更新
+            Integer oldStatus = shopRefundList.get(0).getStatus();
+            Integer newStatus = refund.getStatus();
+            // 状态机校验：仅当新状态是已知售后状态、且发生实际变化时才校验
+            if (newStatus != null && RefundStateMachine.STATE_NAMES.containsKey(newStatus)
+                    && !newStatus.equals(oldStatus)) {
+                if (oldStatus == null) {
+                    // 旧状态为空（初始未设置），允许首次设置为任意合法状态
+                    log.debug("售后单首次设置状态: afterId={}, →{}", refund.getAfterId(),
+                            RefundStateMachine.getStateName(newStatus));
+                } else if (!RefundStateMachine.canTransition(oldStatus, newStatus)) {
+                    // 走 validator 发布"被拦截"事件，再返回友好错误
+                    try {
+                        transitionValidator.validateRefundTransition(oldStatus, newStatus, refund.getAfterId());
+                    } catch (IllegalTransitionException ignore) {
+                        // 预期内的拦截
+                    }
+                    log.warn("售后状态非法迁移被拦截: afterId={}, {}→{}", refund.getAfterId(),
+                            RefundStateMachine.getStateName(oldStatus),
+                            RefundStateMachine.getStateName(newStatus));
+                    return ResultVo.error("售后状态非法迁移：" +
+                            RefundStateMachine.getStateName(oldStatus) + "→" +
+                            RefundStateMachine.getStateName(newStatus));
+                } else {
+                    // 校验通过（同时发布 trace 事件）
+                    transitionValidator.validateRefundTransition(oldStatus, newStatus, refund.getAfterId());
+                }
+            }
             refund.setId(shopRefundList.get(0).getId());
             refund.setUpdateOn(LocalDateTime.now());
             this.baseMapper.updateById(refund);

@@ -10,6 +10,7 @@ import cn.qihangerp.model.entity.*;
 import cn.qihangerp.model.query.ShopOrderQueryBo;
 import cn.qihangerp.service.ShopGoodsSkuShipItemService;
 import cn.qihangerp.service.ShopOrderService;
+import cn.qihangerp.statemachine.TransitionValidator;
 import com.alibaba.fastjson2.util.DateUtils;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -49,6 +50,7 @@ public class ShopOrderServiceImpl extends ServiceImpl<ShopOrderMapper, ShopOrder
     private final ShopOrderPromotionMapper shopOrderPromotionMapper;
     private final ErpRecoveryRecordMapper recoveryRecordMapper;
     private final ErpRecoveryDeductionMapper recoveryDeductionMapper;
+    private final TransitionValidator transitionValidator;
 
     /**
      * 普通发货订单
@@ -165,6 +167,9 @@ public class ShopOrderServiceImpl extends ServiceImpl<ShopOrderMapper, ShopOrder
         List<ShopOrder> shopOrderList = this.baseMapper.selectList(new LambdaQueryWrapper<ShopOrder>().eq(ShopOrder::getOrderId, shopOrderNo));
         if(shopOrderList!=null&&shopOrderList.size()>0){
             log.info("======更新店铺订单物流，找到订单了：{}",shopOrderList.size());
+            Integer currentStatus = shopOrderList.get(0).getOrderStatus();
+            // 状态机校验：发货（→已发货）
+            transitionValidator.validateOrderTransition(currentStatus, 2, shopOrderNo);
             ShopOrder shopOrder = new  ShopOrder();
             shopOrder.setId(shopOrderList.get(0).getId());
             shopOrder.setOrderStatus(2);
@@ -486,6 +491,12 @@ public class ShopOrderServiceImpl extends ServiceImpl<ShopOrderMapper, ShopOrder
         ShopOrder shopOrder = this.baseMapper.selectById(id);
         if(shopOrder==null) return ResultVo.error("找不到订单数据");
         else if(shopOrder.getOrderStatus().intValue()==3) return ResultVo.error("已完成的单不可以取消");
+        // 状态机校验：取消（→已取消）
+        try {
+            transitionValidator.validateOrderTransition(shopOrder.getOrderStatus(), 11, shopOrder.getOrderId());
+        } catch (cn.qihangerp.statemachine.IllegalTransitionException e) {
+            return ResultVo.error("当前订单状态不允许取消：" + cn.qihangerp.statemachine.OrderStateMachine.getStateName(shopOrder.getOrderStatus()));
+        }
         // 取消订单
         ShopOrder update = new ShopOrder();
         update.setId(id);
