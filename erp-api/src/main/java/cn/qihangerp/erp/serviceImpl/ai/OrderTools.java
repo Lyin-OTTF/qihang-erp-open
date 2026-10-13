@@ -1,5 +1,8 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.agent.policy.AutonomyLevel;
+import cn.qihangerp.agent.policy.ToolPolicy;
+import cn.qihangerp.agent.tenant.TenantContext;
 import cn.qihangerp.model.entity.ShopOrder;
 import cn.qihangerp.service.ShopOrderService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -21,6 +24,7 @@ public class OrderTools {
     private final ShopOrderService orderService;
 
     @Tool(description = "查询店铺订单列表，可按天数和订单状态筛选，返回每条记录的订单号、订单金额(分)、支付金额(分)、收件人、收货地址、订单状态、发货状态、下单时间")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "订单查询")
     public String getOrderList(
             @ToolParam(description = "查询最近多少天的订单，默认30天") Integer days,
             @ToolParam(description = "订单状态：0新订单 1待发货 2已发货 3已完成 11已取消 12退款中 13已关闭 21待付款。不传则查全部") Integer orderStatus,
@@ -29,6 +33,10 @@ public class OrderTools {
         if (limit == null || limit <= 0) limit = 100;
 
         LambdaQueryWrapper<ShopOrder> wrapper = new LambdaQueryWrapper<>();
+        Long merchantId = TenantContext.getTenantId();
+        if (merchantId != null) {
+            wrapper.eq(ShopOrder::getMerchantId, merchantId);
+        }
         wrapper.ge(ShopOrder::getCreateOn, LocalDateTime.now().minusDays(days));
         if (orderStatus != null) {
             wrapper.eq(ShopOrder::getOrderStatus, orderStatus);

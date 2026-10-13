@@ -55,7 +55,7 @@ public class Citation {
     /**
      * 引用格式化文本（用于插入AI回答中）
      *
-     * 格式：[1] 文档名称 - 片段摘要 (相似度: 0.95)
+     * 格式：[1] 文档名称 [chunk_id] - 片段摘要 (相似度: 0.95)
      */
     public String toFormattedString() {
         String scoreStr = String.format("%.2f", score);
@@ -63,9 +63,10 @@ public class Citation {
                 ? snippet.substring(0, 50) + "..."
                 : snippet;
 
-        return String.format("[%d] %s - %s (相似度: %s)",
+        return String.format("[%d] %s [%s] - %s (相似度: %s)",
                 index,
                 docName != null ? docName : docId,
+                chunkId,
                 snippetPreview,
                 scoreStr);
     }
@@ -73,16 +74,18 @@ public class Citation {
     /**
      * 引用Markdown格式（用于输出）
      *
-     * 格式：[1] [文档名称](doc_id) - 片段摘要
+     * 格式：[1] **文档名称** [`chunk_id`] (相似度: 0.95)
+     * > 片段摘要
      */
     public String toMarkdown() {
         String snippetPreview = snippet.length() > 100
                 ? snippet.substring(0, 100) + "..."
                 : snippet;
 
-        return String.format("[%d] **%s** (相似度: %.2f)\n> %s",
+        return String.format("[%d] **%s** [`%s`] (相似度: %.2f)\n> %s",
                 index,
                 docName != null ? docName : docId,
+                chunkId,
                 score,
                 snippetPreview);
     }

@@ -1,5 +1,9 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.agent.policy.AutonomyLevel;
+import cn.qihangerp.agent.policy.ToolPolicy;
+import cn.qihangerp.agent.tenant.TenantContext;
+
 import cn.qihangerp.common.PageQuery;
 import cn.qihangerp.common.PageResult;
 import cn.qihangerp.model.entity.OGoods;
@@ -24,11 +28,16 @@ public class GoodsTools {
     private final OGoodsSkuService skuService;
 
     @Tool(description = "根据商品名称关键词搜索ERP商品库中的商品，返回商品名称、编号、零售价、SKU数量等信息")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "商品查询")
     public String searchGoods(
             @ToolParam(description = "商品名称搜索关键词") String keyword) {
         log.info("======Tool查询商品:{}",keyword);
         GoodsQuery query = new GoodsQuery();
         query.setName(keyword);
+        Long merchantId = TenantContext.getTenantId();
+        if (merchantId != null) {
+            query.setMerchantId(merchantId);
+        }
         PageResult<OGoods> result = goodsService.queryPageList(query, new PageQuery());
 
         List<OGoods> list = result.getRecords();
@@ -56,9 +65,11 @@ public class GoodsTools {
     }
 
     @Tool(description = "根据SKU编码、SKU名称或商品名称搜索ERP商品库中的SKU信息，返回SKU编码、名称、价格、规格等详细信息")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "商品查询")
     public String searchSku(
             @ToolParam(description = "搜索关键词，可以是SKU编码、SKU名称或商品名称") String keyword) {
-        List<OGoodsSku> list = skuService.searchGoodsSpec(keyword);
+        Long merchantId = TenantContext.getTenantId();
+        List<OGoodsSku> list = skuService.searchGoodsSpec(keyword, merchantId);
 
         if (list == null || list.isEmpty()) {
             return "未找到匹配的SKU";

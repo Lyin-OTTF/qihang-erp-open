@@ -32,6 +32,71 @@ public class RagEvaluator {
     private final CitationGenerator citationGenerator;
 
     /**
+     * 运行完整评测并持久化结果
+     *
+     * @param merchantId 商户ID
+     * @param topK       检索Top-K
+     * @param remark     备注
+     * @return 评测报告
+     */
+    public RagEvaluationReport runEvaluationAndPersist(Long merchantId, int topK, String remark) {
+        RagEvaluationReport report = runEvaluation(merchantId, topK);
+        persistResult(merchantId, topK, report, remark);
+        return report;
+    }
+
+    /**
+     * 持久化评测结果到agent_rag_eval_result表
+     */
+    private void persistResult(Long merchantId, int topK, RagEvaluationReport report, String remark) {
+        try {
+            String sql = "INSERT INTO agent_rag_eval_result " +
+                    "(merchant_id, eval_time, total_cases, passed_cases, pass_rate, " +
+                    "avg_recall, avg_precision, avg_f1, avg_mrr, avg_ndcg, " +
+                    "avg_answer_relevancy, avg_answer_correctness, avg_faithfulness, " +
+                    "avg_retrieval_time, avg_generation_time, avg_overall_score, " +
+                    "total_time, top_k, retrieval_mode, remark) " +
+                    "VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            jdbcTemplate.update(sql,
+                    merchantId,
+                    report.getTotalCases(),
+                    report.getPassedCases(),
+                    report.getPassRate(),
+                    report.getAvgRecall(),
+                    report.getAvgPrecision(),
+                    report.getAvgF1(),
+                    report.getAvgMRR(),
+                    report.getAvgNDCG(),
+                    report.getAvgAnswerRelevancy(),
+                    report.getAvgAnswerCorrectness(),
+                    report.getAvgFaithfulness(),
+                    report.getAvgRetrievalTime(),
+                    report.getAvgGenerationTime(),
+                    report.getAvgOverallScore(),
+                    report.getTotalTime(),
+                    topK,
+                    "HYBRID",
+                    remark);
+            log.info("评测结果已持久化: merchantId={}, passRate={:.2f}%", merchantId, report.getPassRate());
+        } catch (Exception e) {
+            log.error("持久化评测结果失败: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 查询最近N次评测结果
+     */
+    public List<java.util.Map<String, Object>> getRecentResults(Long merchantId, int limit) {
+        String sql = "SELECT id, eval_time, total_cases, passed_cases, pass_rate, " +
+                "avg_recall, avg_precision, avg_f1, avg_mrr, avg_ndcg, " +
+                "avg_overall_score, total_time, retrieval_mode, remark " +
+                "FROM agent_rag_eval_result " +
+                "WHERE merchant_id = ? " +
+                "ORDER BY eval_time DESC LIMIT ?";
+        return jdbcTemplate.queryForList(sql, merchantId, limit);
+    }
+
+    /**
      * 运行完整评测
      *
      * @param merchantId 商户ID

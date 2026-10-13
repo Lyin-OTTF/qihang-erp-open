@@ -3,6 +3,7 @@ package cn.qihangerp.model.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -258,4 +259,10 @@ public class ShopRefund {
      * 平台类型
      */
     private String platformType;
+
+    /**
+     * 乐观锁版本号
+     */
+    @Version
+    private Integer version;
 }

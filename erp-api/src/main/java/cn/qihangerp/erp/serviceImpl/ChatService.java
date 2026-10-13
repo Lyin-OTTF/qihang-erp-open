@@ -1,5 +1,6 @@
 package cn.qihangerp.erp.serviceImpl;
 
+import cn.qihangerp.agent.tenant.TenantContext;
 import cn.qihangerp.erp.serviceImpl.ai.AiOrchestrationService;
 import cn.qihangerp.erp.serviceImpl.ai.GoodsTools;
 import cn.qihangerp.erp.serviceImpl.ai.InventoryTools;
@@ -28,7 +29,10 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -71,7 +75,20 @@ public class ChatService {
                 }
             }
 
-            ChatClient chatClient = orchestrationService.buildChatClient(config, goodsTools, orderTools, refundTools, inventoryTools, shopTools, purchaseTools, memberTools, supplierTools, logisticsTools, warehouseTools, stockFlowTools);
+            // 在请求线程上读取租户ID（由 TenantInterceptor 从 Header/参数注入），
+            // 生成 traceId，一并放入 toolContext，随 ChatClient 透传到每次工具调用
+            Long merchantId = TenantContext.getTenantId();
+            String traceId = UUID.randomUUID().toString();
+            Map<String, Object> toolContext = new HashMap<>();
+            toolContext.put("merchantId", merchantId);
+            toolContext.put("userId", userId);
+            toolContext.put("traceId", traceId);
+            toolContext.put("sessionId", sessionId);
+            toolContext.put("approved", false);
+            toolContext.put("source", "WebUI");
+            log.info("AI对话 sessionId={} userId={} merchantId={} traceId={}", sessionId, userId, merchantId, traceId);
+
+            ChatClient chatClient = orchestrationService.buildChatClient(config, toolContext, goodsTools, orderTools, refundTools, inventoryTools, shopTools, purchaseTools, memberTools, supplierTools, logisticsTools, warehouseTools, stockFlowTools);
 
             StringBuilder fullResponse = new StringBuilder();
 

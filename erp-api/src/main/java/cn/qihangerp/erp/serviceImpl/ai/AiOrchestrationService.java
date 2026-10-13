@@ -1,5 +1,6 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.agent.gateway.GatewayToolCallbackFactory;
 import cn.qihangerp.model.entity.AiConfig;
 import cn.qihangerp.service.AiConfigService;
 import lombok.RequiredArgsConstructor;
@@ -9,12 +10,15 @@ import org.springframework.ai.deepseek.DeepSeekChatModel;
 import org.springframework.ai.deepseek.DeepSeekChatOptions;
 import org.springframework.ai.deepseek.api.DeepSeekApi;
 import org.springframework.ai.model.SimpleApiKey;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.http.client.ReactorClientHttpRequestFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 import reactor.netty.http.client.HttpClient;
 
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @RequiredArgsConstructor
@@ -22,12 +26,18 @@ import java.time.Duration;
 public class AiOrchestrationService {
 
     private final AiConfigService aiConfigService;
+    private final GatewayToolCallbackFactory gatewayToolCallbackFactory;
 
     public AiConfig getDefaultConfig() {
         return aiConfigService.getDefaultConfig();
     }
 
-    public ChatClient buildChatClient(AiConfig config, Object... tools) {
+    /**
+     * 构建带网关拦截的 ChatClient。
+     * 所有 @Tool 方法通过 {@link GatewayToolCallbackFactory} 包装为 GatewayToolCallback，
+     * 统一接入 ToolGateway；toolContext 中的 merchantId/userId/traceId 等会透传到每次工具调用。
+     */
+    public ChatClient buildChatClient(AiConfig config, Map<String, Object> toolContext, Object... tools) {
         String baseUrl = config.getApiEndpoint()
                 .replaceAll("/v1/?$", "")
                 .replaceAll("/+$", "");
@@ -53,9 +63,18 @@ public class AiOrchestrationService {
 
         ChatClient.Builder builder = ChatClient.builder(chatModel);
         if (tools.length > 0) {
-            builder.defaultTools(tools);
+            List<ToolCallback> callbacks = gatewayToolCallbackFactory.create(tools);
+            builder.defaultToolCallbacks(callbacks.toArray(new ToolCallback[0]));
+            if (toolContext != null && !toolContext.isEmpty()) {
+                builder.defaultToolContext(toolContext);
+            }
         }
         return builder.build();
+    }
+
+    /** 兼容旧调用：无 toolContext，走网关但上下文为空 */
+    public ChatClient buildChatClient(AiConfig config, Object... tools) {
+        return buildChatClient(config, null, tools);
     }
 
     public ChatClient buildDefaultChatClient(Object... tools) {

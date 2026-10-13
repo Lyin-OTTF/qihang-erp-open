@@ -90,20 +90,6 @@ spring:
       username: qihang
       password: qihang123456
 
-# ============ Redisson配置（分布式锁）============
-redisson:
-  config: |
-    singleServerConfig:
-      address: "redis://127.0.0.1:6379"
-      password: "qihang123456"
-      database: 0
-      connectionPoolSize: 64
-      connectionMinimumIdleSize: 10
-      idleConnectionTimeout: 10000
-      connectTimeout: 10000
-      timeout: 3000
-    threads: 16
-    nettyThreads: 32
 
 # ============ Agent配置 ============
 agent:

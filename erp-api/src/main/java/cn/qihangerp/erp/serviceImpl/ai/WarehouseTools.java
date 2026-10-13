@@ -1,5 +1,9 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.agent.policy.AutonomyLevel;
+import cn.qihangerp.agent.policy.ToolPolicy;
+import cn.qihangerp.agent.tenant.TenantContext;
+
 import cn.qihangerp.model.entity.ErpWarehouse;
 import cn.qihangerp.service.ErpWarehouseService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -19,8 +23,13 @@ public class WarehouseTools {
     private final ErpWarehouseService warehouseService;
 
     @Tool(description = "查询仓库列表，返回每条记录的仓库名称、类型、状态、地址信息")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "仓库查询")
     public String getWarehouseList() {
         LambdaQueryWrapper<ErpWarehouse> wrapper = new LambdaQueryWrapper<>();
+        Long merchantId = TenantContext.getTenantId();
+        if (merchantId != null) {
+            wrapper.eq(ErpWarehouse::getMerchantId, merchantId);
+        }
         wrapper.eq(ErpWarehouse::getStatus, "ENABLE");
         List<ErpWarehouse> list = warehouseService.list(wrapper);
 

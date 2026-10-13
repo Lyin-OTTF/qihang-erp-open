@@ -1,5 +1,9 @@
 package cn.qihangerp.agent.gateway;
 
+import cn.qihangerp.agent.audit.ActionLedgerRequest;
+import cn.qihangerp.agent.audit.ActionLedgerService;
+import cn.qihangerp.agent.approval.ApprovalRequest;
+import cn.qihangerp.agent.approval.ApprovalService;
 import cn.qihangerp.agent.evaluation.MetricsCollector;
 import cn.qihangerp.agent.policy.AutonomyLevel;
 import cn.qihangerp.agent.policy.ToolPolicy;
@@ -44,6 +48,14 @@ public class ToolGateway {
     @Autowired(required = false)
     private MetricsCollector metricsCollector;
 
+    // 审计服务（可选依赖，如果不存在则降级为只打印日志）
+    @Autowired(required = false)
+    private ActionLedgerService actionLedgerService;
+
+    // 审批服务（可选依赖，用于ESCALATE级别人工审批）
+    @Autowired(required = false)
+    private ApprovalService approvalService;
+
     /**
      * 执行Tool方法（核心入口）
      *
@@ -83,9 +95,9 @@ public class ToolGateway {
 
             // 步骤4: 租户隔离检查
             if (policy.requiresTenantIsolation() && context.getMerchantId() == null) {
-                String errorMsg = "缺少租户ID，无法执行需要租户隔离的Tool: " + toolName;
-                log.error(errorMsg);
-                throw new ToolExecutionException(errorMsg);
+                // 回溯开发-阶段1调整：缺失租户ID时告警放行，避免破坏现有无租户头的调用链路；
+                // 工具层会在 TenantContext 有值时自行加 merchantId 过滤，无值时保持原行为（查全部）。
+                log.warn("Tool[{}]未携带租户ID，跳过强制租户隔离（向后兼容），工具层将按无租户处理", toolName);
             }
 
             // 步骤5: 并发控制
@@ -100,13 +112,29 @@ public class ToolGateway {
             // 步骤6: 人工确认检查（ESCALATE级别）
             if (policy.level() == AutonomyLevel.ESCALATE) {
                 if (!context.isApproved()) {
-                    // 需要人工确认，但尚未获得批准
-                    log.info("Tool[{}]需要人工确认，等待审批", toolName);
-                    throw new ApprovalRequiredException(
-                            "此操作需要人工确认: " + policy.description(),
-                            toolName,
-                            context.getTraceId()
-                    );
+                    // 检查是否已有通过的审批（同一traceId+toolName）
+                    boolean alreadyApproved = approvalService != null
+                            && approvalService.isApproved(context.getTraceId(), toolName);
+                    if (alreadyApproved) {
+                        log.info("Tool[{}]已有审批通过记录，直接执行", toolName);
+                        ApprovalRequest approved = approvalService.getApprovedApproval(context.getTraceId(), toolName);
+                        if (approved != null) {
+                            context.setApprovalId(approved.getId());
+                            context.setApproved(true);
+                        }
+                    } else {
+                        // 创建审批记录，等待人工确认
+                        Long approvalId = null;
+                        if (approvalService != null) {
+                            approvalId = approvalService.createApproval(
+                                    context.getTraceId(), toolName, policy.description(),
+                                    context.getMerchantId(), context.getUserId(), args);
+                        }
+                        log.info("Tool[{}]需要人工确认，已创建审批记录 id={}", toolName, approvalId);
+                        throw new ApprovalRequiredException(
+                                "此操作需要人工确认: " + policy.description(),
+                                toolName, context.getTraceId(), approvalId);
+                    }
                 }
             }
 
@@ -124,6 +152,17 @@ public class ToolGateway {
             long duration = System.currentTimeMillis() - startTime;
             log.info("Tool[{}]执行成功，耗时{}ms", toolName, duration);
 
+            // ESCALATE 工具执行成功后，标记审批为已执行
+            if (policy.level() == AutonomyLevel.ESCALATE && context.getApprovalId() != null && approvalService != null) {
+                try {
+                    String resultSummary = result != null ? result.toString() : "null";
+                    if (resultSummary.length() > 500) resultSummary = resultSummary.substring(0, 500);
+                    approvalService.markExecuted(context.getApprovalId(), resultSummary);
+                } catch (Exception e) {
+                    log.warn("标记审批执行状态失败: {}", e.getMessage());
+                }
+            }
+
             // 记录成功指标
             if (metricsCollector != null) {
                 metricsCollector.recordSuccess(toolName, policy.category(), duration, context.getMerchantId());
@@ -136,8 +175,11 @@ public class ToolGateway {
             throw e;
 
         } catch (Exception e) {
+            // 解包反射调用异常（method.invoke 会把目标异常包装为 InvocationTargetException）
+            Throwable actualError = (e instanceof java.lang.reflect.InvocationTargetException
+                    && e.getCause() != null) ? e.getCause() : e;
             long duration = System.currentTimeMillis() - startTime;
-            log.error("Tool[{}]执行失败，耗时{}ms，错误: {}", toolName, duration, e.getMessage(), e);
+            log.error("Tool[{}]执行失败，耗时{}ms，错误: {}", toolName, duration, actualError.getMessage(), e);
 
             // 确定错误类型
             String errorType = determineErrorType(e);
@@ -149,7 +191,7 @@ public class ToolGateway {
                             .getAnnotation(ToolPolicy.class);
                     String category = policy != null ? policy.category() : "未分类";
                     metricsCollector.recordFailure(toolName, category, duration, errorType,
-                            e.getMessage(), context.getMerchantId());
+                            actualError.getMessage(), context.getMerchantId());
                 } catch (Exception metricsEx) {
                     log.error("记录失败指标时出错: {}", metricsEx.getMessage());
                 }
@@ -160,7 +202,7 @@ public class ToolGateway {
                 ToolPolicy policy = findToolMethod(toolInstance.getClass(), methodName)
                         .getAnnotation(ToolPolicy.class);
                 if (policy != null && policy.requiresAudit()) {
-                    recordAuditLog(toolName, policy, context, args, null, false, e.getMessage(), startTime);
+                    recordAuditLog(toolName, policy, context, args, null, false, actualError.getMessage(), startTime);
                 }
             } catch (Exception auditEx) {
                 log.error("记录审计日志失败: {}", auditEx.getMessage());
@@ -235,17 +277,45 @@ public class ToolGateway {
     }
 
     /**
-     * 记录审计日志（占位方法，实际由ActionLedger实现）
+     * 记录审计日志到ActionLedger
+     * 审计失败不影响业务流程，仅打印错误日志
      */
     private void recordAuditLog(String toolName, ToolPolicy policy,
                                 ToolExecutionContext context, Object[] args,
                                 Object result, boolean success, String errorMessage,
                                 long startTime) {
-        // TODO: 集成ActionLedger，记录审计日志
-        // 当前只打印日志，Task #8会实现完整的审计功能
-        log.info("[审计] Tool={}, Category={}, MerchantId={}, UserId={}, Success={}, Duration={}ms",
-                toolName, policy.category(), context.getMerchantId(),
-                context.getUserId(), success, System.currentTimeMillis() - startTime);
+        if (actionLedgerService == null) {
+            log.info("[审计降级] Tool={}, Category={}, MerchantId={}, UserId={}, Success={}",
+                    toolName, policy.category(), context.getMerchantId(),
+                    context.getUserId(), success);
+            return;
+        }
+        try {
+            ActionLedgerRequest request = ActionLedgerRequest.builder()
+                    .traceId(context.getTraceId())
+                    .toolName(toolName)
+                    .toolScope(policy.category())
+                    .autonomyLevel(policy.level() != null ? policy.level().name() : null)
+                    .merchantId(context.getMerchantId())
+                    .userId(context.getUserId())
+                    .sessionId(context.getSessionId())
+                    .inputParams(args)
+                    .outputResult(result)
+                    .success(success)
+                    .errorMessage(errorMessage)
+                    .errorType(success ? null : (errorMessage != null ? errorMessage.length() > 50 ? errorMessage.substring(0, 50) : errorMessage : null))
+                    .startTime(new java.util.Date(startTime).toInstant().atZone(java.time.ZoneId.systemDefault()).toLocalDateTime())
+                    .endTime(java.time.LocalDateTime.now())
+                    .durationMs((int) (System.currentTimeMillis() - startTime))
+                    .isWriteOperation(policy.level() != null && policy.level().allowsWrite())
+                    .requiresApproval(policy.level() == AutonomyLevel.ESCALATE)
+                    .ipAddress(context.getClientIp())
+                    .userAgent(context.getSource())
+                    .build();
+            actionLedgerService.recordAction(request);
+        } catch (Exception e) {
+            log.error("记录审计日志失败（不影响业务）: tool={}, error={}", toolName, e.getMessage());
+        }
     }
 
     /**
@@ -319,11 +389,13 @@ public class ToolGateway {
     public static class ApprovalRequiredException extends ToolExecutionException {
         private final String toolName;
         private final String traceId;
+        private final Long approvalId;
 
-        public ApprovalRequiredException(String message, String toolName, String traceId) {
+        public ApprovalRequiredException(String message, String toolName, String traceId, Long approvalId) {
             super(message);
             this.toolName = toolName;
             this.traceId = traceId;
+            this.approvalId = approvalId;
         }
 
         public String getToolName() {
@@ -332,6 +404,10 @@ public class ToolGateway {
 
         public String getTraceId() {
             return traceId;
+        }
+
+        public Long getApprovalId() {
+            return approvalId;
         }
     }
 }

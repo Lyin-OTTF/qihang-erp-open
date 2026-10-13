@@ -25,6 +25,8 @@ public class RagController {
     private final BM25Retriever bm25Retriever;
     private final CitationGenerator citationGenerator;
     private final RagEvaluator ragEvaluator;
+    private final RagEvaluationScheduler ragEvaluationScheduler;
+    private final MysqlFullTextRetriever mysqlFullTextRetriever;
 
     /**
      * 混合检索（BM25 + Vector + RRF融合）
@@ -351,25 +353,62 @@ public class RagController {
     }
 
     /**
-     * 运行RAG离线评测
+     * 运行RAG离线评测（结果持久化）
      *
      * POST /api/agent/rag/evaluate
      * Body: {
      *   "merchantId": 1001,
-     *   "topK": 10
+     *   "topK": 10,
+     *   "remark": "手动评测"
      * }
      */
     @PostMapping("/evaluate")
     public Map<String, Object> runEvaluation(@RequestBody Map<String, Object> request) {
         Long merchantId = Long.valueOf(request.get("merchantId").toString());
         Integer topK = request.get("topK") != null ? (Integer) request.get("topK") : 10;
+        String remark = request.get("remark") != null ? (String) request.get("remark") : "手动评测";
 
-        RagEvaluator.RagEvaluationReport report = ragEvaluator.runEvaluation(merchantId, topK);
+        RagEvaluator.RagEvaluationReport report = ragEvaluationScheduler.runManualEvaluation(merchantId, topK, remark);
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
         response.put("report", report);
+        response.put("persisted", true);
 
+        return response;
+    }
+
+    /**
+     * 查询最近评测历史
+     *
+     * GET /api/agent/rag/evaluate/history?merchantId=1&limit=10
+     */
+    @GetMapping("/evaluate/history")
+    public Map<String, Object> getEvaluationHistory(
+            @RequestParam(defaultValue = "1") Long merchantId,
+            @RequestParam(defaultValue = "10") Integer limit) {
+
+        List<java.util.Map<String, Object>> history = ragEvaluator.getRecentResults(merchantId, limit);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("merchantId", merchantId);
+        response.put("count", history.size());
+        response.put("history", history);
+
+        return response;
+    }
+
+    /**
+     * 获取MySQL全文检索状态（PGVector降级方案）
+     *
+     * GET /api/agent/rag/mysql-ft/status
+     */
+    @GetMapping("/mysql-ft/status")
+    public Map<String, Object> getMysqlFtStatus() {
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("status", mysqlFullTextRetriever.getStatistics());
         return response;
     }
 }

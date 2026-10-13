@@ -4,6 +4,50 @@
 
 ---
 
+## [Week2-3 加固] 2026-10-12 — 工具网关审计接入 + 策略注解 + 编译修复
+
+**对应方案进度**：第一阶段 Week2-3「工具权限与审计系统」加固
+**里程碑**：ToolGateway 审计从 TODO 占位升级为真实写库，11 个业务 Tool 全部声明自治策略，阻断性编译问题彻底解决
+
+### 新增功能
+
+| 文件 | 说明 |
+|------|------|
+| `erp-api/.../agent/audit/ActionLedger.java` | 审计日志实体（@TableName agent_action_ledger） |
+| `erp-api/.../agent/audit/ActionLedgerMapper.java` | MyBatis-Plus Mapper |
+| `erp-api/.../agent/audit/ActionLedgerService.java` | 审计服务（recordAction / 按 traceId/merchantId/userId 查询 / 成功率统计，审计失败不抛异常） |
+| `erp-api/.../agent/audit/ActionLedgerController.java` | 审计查询 REST API（/api/agent/audit） |
+| `erp-api/.../agent/audit/ActionLedgerRequest.java` | 审计请求 Builder（纯手写无 Lombok） |
+| `erp-api/.../agent/tenant/TenantContext.java` | ThreadLocal 租户上下文 |
+| `erp-api/.../agent/tenant/TenantInterceptor.java` | 从 Header X-Tenant-Id 或参数 merchantId 提取，afterCompletion 清理 |
+| `erp-api/.../agent/tenant/TenantWebMvcConfig.java` | 注册拦截器 |
+| `erp-api/src/main/resources/db/migration/V1_14_0__create_agent_action_ledger.sql` | agent_action_ledger 建表（含 7 个索引） |
+
+### 变更与说明
+
+- **ToolGateway.java**：注入 ActionLedgerService（@Autowired required=false 降级兼容），`recordAuditLog` 从 TODO 占位（只打日志）改为真实调用 `actionLedgerService.recordAction()`，构造完整 ActionLedgerRequest（traceId/toolName/toolScope/autonomyLevel/merchantId/userId/sessionId/inputParams/outputResult/success/errorMessage/startTime/endTime/durationMs/isWriteOperation/requiresApproval/ipAddress/userAgent），审计失败 catch 不抛异常
+- **11 个业务 Tool 类**：全部 13 个 @Tool 方法加 `@ToolPolicy(level = AutonomyLevel.OBSERVE, category = "...")`（OrderTools/GoodsTools/InventoryTools/LogisticsTools/MemberTools/PurchaseTools/RefundTools/ShopTools/StockFlowTools/SupplierTools/WarehouseTools），全部为只读查询统一 OBSERVE 级别
+- **R.java 编译修复（重大）**：根因是 `R extends HashMap<String,Object>` 无泛型参数，而 ActionLedgerController 用了 `R<List<ActionLedger>>` 等参数化用法，javac 解析"无泛型类被参数化使用"时类型解析异常，**触发 Lombok 注解处理器全局中止**，导致整个模块 98 个 Lombok 类的生成方法全部找不到（200 个编译错误）。修复：给 R.java 加标准泛型 `<T>`，所有静态方法返回 `R<T>`
+- **redisson 移除**：redisson-spring-boot-starter 3.35.0（Week4-6 引入、针对 Boot 3.x）在 Boot 4.1 下引用已移除的 `RedisProperties` 类导致启动失败，且项目代码完全没用 Redisson，从 pom 和 application-agent.yml 移除
+- **PGVector 排除**：`spring.ai.vectorstore.pgvector.enabled=false` 在 Spring AI 2.0/Boot 4.1 下无法禁用 PgVectorStoreAutoConfiguration，改用 `@SpringBootApplication(exclude=PgVectorStoreAutoConfiguration.class)`
+
+### 验证情况
+
+| 项 | 结果 |
+|----|------|
+| 多模块 clean compile | BUILD SUCCESS（134 个源文件） |
+| 全部单元测试 | 49/49 通过（erp-api 19：ToolGatewayTest 9 + LayeredMemoryTest 10；其他模块 30） |
+| Lombok @Builder 生成 | 确认正常（ActionLedger$ActionLedgerBuilder.class 存在） |
+
+### 已知限制（诚实说明）
+
+- **ToolGateway 不自动拦截 AI 调用**：Spring AI 的 @Tool 调用由框架默认 MethodToolCallback 直接反射执行（method.invoke），不经过 ToolGateway。因此 @ToolPolicy 注解和 ToolGateway 的策略检查/审计在 AI 自动调用时不会自动触发，需手动通过 `toolGateway.execute()` 调用才生效。AOP 自动拦截因 method.invoke 可能绕过 Spring 代理、技术风险高，暂未实施
+- **11 个 Tool 未做租户数据过滤**：Tool 方法的查询没有自动带 merchantId 过滤条件（需修改每个 Tool 的查询逻辑，侵入式，暂未实施）
+- **Week1-2 状态机/乐观锁/分布式锁/幂等键**：完全空白，涉及订单/售后核心流程与实体/DDL，风险高，未实施
+- **Week4-6 RAG 向量检索**：HybridRetriever.retrieveByVector 是 TODO 返回硬编码假数据，PGVector 因缺 EmbeddingModel 不可用，BM25 纯内存无持久化
+
+---
+
 ## [Week6-7] 2026-10-12 — 持久化分层记忆
 
 **对应方案进度**：第二阶段 Week6-7「持久化分层记忆」（Task 19-23）

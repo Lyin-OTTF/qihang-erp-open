@@ -26,6 +26,11 @@ public class OGoodsSkuServiceImpl extends ServiceImpl<OGoodsSkuMapper, OGoodsSku
 
     @Override
     public List<OGoodsSku> searchGoodsSpec(String keyword) {
+        return searchGoodsSpec(keyword, null);
+    }
+
+    @Override
+    public List<OGoodsSku> searchGoodsSpec(String keyword, Long merchantId) {
         LambdaQueryWrapper<OGoodsSku> queryWrapper =
                 new LambdaQueryWrapper<OGoodsSku>()
                         .likeRight(OGoodsSku::getGoodsId,keyword).or()
@@ -34,6 +39,9 @@ public class OGoodsSkuServiceImpl extends ServiceImpl<OGoodsSkuMapper, OGoodsSku
                         .like(OGoodsSku::getGoodsName,keyword).or()
                         .like(OGoodsSku::getSkuName,keyword)
                 ;
+        if (merchantId != null) {
+            queryWrapper.eq(OGoodsSku::getMerchantId, merchantId);
+        }
         queryWrapper.last("LIMIT 10");
         return skuMapper.selectList(queryWrapper);
     }

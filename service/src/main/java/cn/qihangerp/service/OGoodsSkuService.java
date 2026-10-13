@@ -13,6 +13,8 @@ import java.util.List;
 */
 public interface OGoodsSkuService extends IService<OGoodsSku> {
     List<OGoodsSku> searchGoodsSpec(String keyword);
+    /** 带租户过滤的SKU搜索（回溯开发-阶段1新增） */
+    List<OGoodsSku> searchGoodsSpec(String keyword, Long merchantId);
     List<OGoodsSku> selectSkuAll(Long merchantId);
     OGoodsSku getGoodsSkuByCode(String skuCode);
     OGoodsSku getGoodsSkuByOuterSkuCode(String outerSkuCode);

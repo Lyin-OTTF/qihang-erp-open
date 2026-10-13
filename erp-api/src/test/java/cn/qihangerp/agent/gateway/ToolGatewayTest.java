@@ -100,30 +100,28 @@ class ToolGatewayTest {
     }
 
     /**
-     * 测试5：需要租户隔离的Tool必须提供merchantId
+     * 测试5：缺失租户ID时告警放行（回溯开发-阶段1调整，向后兼容）
+     *
+     * 原行为：requiresTenantIsolation=true 且 merchantId=null 时抛出 ToolExecutionException。
+     * 现行为：记录 warn 日志后放行，工具层在 TenantContext 有值时自行过滤，无值时保持原行为。
+     * 此变更是为了不破坏现有未携带租户头的调用链路。
      */
     @Test
-    void testTenantIsolationRequired() {
+    void testTenantIsolationOptionalForBackwardCompat() {
         ToolExecutionContext contextWithoutMerchant = new ToolExecutionContext();
         contextWithoutMerchant.setUserId(100L);
         contextWithoutMerchant.setTraceId("test-trace-002");
         // merchantId为null
 
-        ToolGateway.ToolExecutionException exception = assertThrows(
-                ToolGateway.ToolExecutionException.class,
-                () -> toolGateway.execute(
-                        mockTool,
-                        "readOnlyQuery",
-                        contextWithoutMerchant,
-                        "param"
-                )
-        );
+        Object result = assertDoesNotThrow(() -> toolGateway.execute(
+                mockTool,
+                "readOnlyQuery",
+                contextWithoutMerchant,
+                "param"
+        ));
 
-        assertTrue(
-                exception.getMessage().contains("缺少租户ID") ||
-                        exception.getMessage().contains("Tool执行失败"),
-                "异常消息应包含'缺少租户ID'，实际: " + exception.getMessage()
-        );
+        assertEquals("查询结果: param", result,
+                "缺失租户ID时应告警放行并正常执行，而非抛出异常");
     }
 
     /**
