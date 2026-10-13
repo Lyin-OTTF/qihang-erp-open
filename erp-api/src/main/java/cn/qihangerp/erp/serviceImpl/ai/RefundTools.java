@@ -1,5 +1,9 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.agent.policy.AutonomyLevel;
+import cn.qihangerp.agent.policy.ToolPolicy;
+import cn.qihangerp.agent.tenant.TenantContext;
+
 import cn.qihangerp.model.entity.ShopRefund;
 import cn.qihangerp.service.ShopRefundService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -21,6 +25,7 @@ public class RefundTools {
     private final ShopRefundService refundService;
 
     @Tool(description = "查询退款记录列表，可按天数、退款原因、商品名筛选，返回每条记录的商品名、退款原因、退款金额(分)、申请时间、售后状态")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "售后查询")
     public String getRefundList(
             @ToolParam(description = "查询最近多少天的退款，默认90天") Integer days,
             @ToolParam(description = "按退款原因筛选。不传则查全部") String reason,
@@ -30,6 +35,10 @@ public class RefundTools {
         if (limit == null || limit <= 0) limit = 200;
 
         LambdaQueryWrapper<ShopRefund> wrapper = new LambdaQueryWrapper<>();
+        Long merchantId = TenantContext.getTenantId();
+        if (merchantId != null) {
+            wrapper.eq(ShopRefund::getMerchantId, merchantId);
+        }
         wrapper.ge(ShopRefund::getCreateOn, LocalDateTime.now().minusDays(days));
         if (reason != null && !reason.isBlank()) {
             wrapper.like(ShopRefund::getReason, reason);

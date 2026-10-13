@@ -1,5 +1,9 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.agent.policy.AutonomyLevel;
+import cn.qihangerp.agent.policy.ToolPolicy;
+import cn.qihangerp.agent.tenant.TenantContext;
+
 import cn.qihangerp.model.entity.ShopMember;
 import cn.qihangerp.service.ShopMemberService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -21,12 +25,17 @@ public class MemberTools {
     private final ShopMemberService memberService;
 
     @Tool(description = "查询会员/客户列表，可按名称或手机号关键词搜索，返回每条记录的姓名、手机号、收货地址、所属平台、创建时间")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "会员查询")
     public String getMemberList(
             @ToolParam(description = "搜索关键词，匹配姓名或手机号") String keyword,
             @ToolParam(description = "返回的最大记录数，默认50条") Integer limit) {
         if (limit == null || limit <= 0) limit = 50;
 
         LambdaQueryWrapper<ShopMember> wrapper = new LambdaQueryWrapper<>();
+        Long merchantId = TenantContext.getTenantId();
+        if (merchantId != null) {
+            wrapper.eq(ShopMember::getMerchantId, merchantId);
+        }
         if (keyword != null && !keyword.isBlank()) {
             wrapper.and(w -> w.like(ShopMember::getName, keyword)
                     .or().like(ShopMember::getPhone, keyword)

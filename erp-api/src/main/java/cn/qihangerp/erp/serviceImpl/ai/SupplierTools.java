@@ -1,5 +1,9 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.agent.policy.AutonomyLevel;
+import cn.qihangerp.agent.policy.ToolPolicy;
+import cn.qihangerp.agent.tenant.TenantContext;
+
 import cn.qihangerp.model.entity.ErpSupplier;
 import cn.qihangerp.service.ErpSupplierService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -19,12 +23,17 @@ public class SupplierTools {
     private final ErpSupplierService supplierService;
 
     @Tool(description = "查询供应商列表，可按名称关键词搜索，返回每条记录的供应商名、联系人、联系电话、地址")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "供应商查询")
     public String getSupplierList(
             @ToolParam(description = "供应商名称搜索关键词") String keyword,
             @ToolParam(description = "返回的最大记录数，默认50条") Integer limit) {
         if (limit == null || limit <= 0) limit = 50;
 
         LambdaQueryWrapper<ErpSupplier> wrapper = new LambdaQueryWrapper<>();
+        Long merchantId = TenantContext.getTenantId();
+        if (merchantId != null) {
+            wrapper.eq(ErpSupplier::getMerchantId, merchantId);
+        }
         wrapper.eq(ErpSupplier::getIsDelete, 0);
         if (keyword != null && !keyword.isBlank()) {
             wrapper.like(ErpSupplier::getName, keyword);

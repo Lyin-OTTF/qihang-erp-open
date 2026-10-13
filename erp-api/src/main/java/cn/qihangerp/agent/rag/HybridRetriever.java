@@ -35,8 +35,8 @@ public class HybridRetriever {
     // BM25检索器
     private final BM25Retriever bm25Retriever;
 
-    // 向量检索器（占位，需要集成PGVector）
-    // private final VectorStoreRetriever vectorRetriever;
+    // MySQL全文检索器（PGVector不可用时的降级方案）
+    private final MysqlFullTextRetriever mysqlFullTextRetriever;
 
     /**
      * 混合检索
@@ -78,21 +78,24 @@ public class HybridRetriever {
 
     /**
      * 向量检索（语义相似）
+     *
+     * <p>三级降级链路：PGVector(向量语义) → MySQL FULLTEXT(全文相关性) → 空列表(纯BM25)</p>
+     *
+     * <p>当前PGVector/EmbeddingModel未配置，使用MySQL全文索引（ngram分词器）
+     * 作为语义检索降级方案。MySQL全文检索失败时返回空列表，RRF融合自动降级为纯BM25。</p>
      */
     private List<RetrievalResult> retrieveByVector(String query, int topK, Long merchantId) {
-        // TODO: 集成Spring AI VectorStore
-        log.debug("执行向量检索（占位）: query=, topK={}", query, topK);
-
-        // 占位实现：返回模拟数据
-        List<RetrievalResult> results = new ArrayList<>();
-        results.add(RetrievalResult.createVectorResult(
-                "chunk_001", "订单查询相关内容...", 0.95, "doc_001"));
-        results.add(RetrievalResult.createVectorResult(
-                "chunk_002", "退款流程相关内容...", 0.88, "doc_002"));
-        results.add(RetrievalResult.createVectorResult(
-                "chunk_003", "库存管理相关内容...", 0.82, "doc_003"));
-
-        return results;
+        // 优先使用MySQL全文检索作为PGVector的降级方案
+        if (mysqlFullTextRetriever != null && mysqlFullTextRetriever.isAvailable()) {
+            List<RetrievalResult> ftResults = mysqlFullTextRetriever.retrieve(query, topK, merchantId);
+            if (!ftResults.isEmpty()) {
+                log.debug("MySQL全文检索召回{}个结果（PGVector降级模式）", ftResults.size());
+                return ftResults;
+            }
+        }
+        // MySQL全文检索不可用或无结果，返回空列表，混合检索降级为BM25-only
+        log.debug("向量检索/全文检索均无结果，降级为BM25-only: query={}", query);
+        return Collections.emptyList();
     }
 
     /**

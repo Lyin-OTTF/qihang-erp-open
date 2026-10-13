@@ -1,5 +1,9 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.agent.policy.AutonomyLevel;
+import cn.qihangerp.agent.policy.ToolPolicy;
+import cn.qihangerp.agent.tenant.TenantContext;
+
 import cn.qihangerp.model.entity.OGoodsInventory;
 import cn.qihangerp.service.OGoodsInventoryService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -19,12 +23,17 @@ public class InventoryTools {
     private final OGoodsInventoryService inventoryService;
 
     @Tool(description = "查询SKU库存列表，可按可用库存范围筛选，返回每条记录的SKU名称、编码、可用库存、仓库ID")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "库存查询")
     public String getInventoryList(
             @ToolParam(description = "查询可用库存小于等于此值的SKU。不传则查全部") Integer availableLte,
             @ToolParam(description = "返回的最大记录数，默认100条") Integer limit) {
         if (limit == null || limit <= 0) limit = 100;
 
         LambdaQueryWrapper<OGoodsInventory> wrapper = new LambdaQueryWrapper<>();
+        Long merchantId = TenantContext.getTenantId();
+        if (merchantId != null) {
+            wrapper.eq(OGoodsInventory::getMerchantId, merchantId);
+        }
         if (availableLte != null) {
             wrapper.le(OGoodsInventory::getAvailableQuantity, availableLte);
         }

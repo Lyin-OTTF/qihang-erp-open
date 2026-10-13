@@ -184,11 +184,16 @@ public class BM25Retriever {
     }
 
     /**
-     * 中文分词（简化实现）
+     * 中文分词（bigram二元语法 + 英文/数字原词）
      *
-     * 生产环境建议使用：
+     * <p>原实现用正则将整段连续中文作为单个token，导致查询"退款流程"
+     * 无法匹配文档中的"已发货订单退款流程"（token边界不对齐）。
+     * 改为中文bigram（重叠二元组）后，"退款流程"→[退款,款流,流程]，
+     * 可与文档中的bigram部分匹配，是无专业分词器时的标准替代方案。</p>
+     *
+     * <p>生产环境建议替换为：
      * - jieba分词: https://github.com/huaban/jieba-analysis
-     * - HanLP: https://github.com/hankcs/HanLP
+     * - HanLP: https://github.com/hankcs/HanLP</p>
      *
      * @param text 文本
      * @return 词列表
@@ -202,8 +207,18 @@ public class BM25Retriever {
         java.util.regex.Matcher matcher = WORD_PATTERN.matcher(text);
         while (matcher.find()) {
             String token = matcher.group().toLowerCase();
-            // 过滤停用词和单字符（简化实现）
-            if (token.length() > 1) {
+            if (token.length() <= 1) {
+                continue;
+            }
+            // 判断是否纯中文
+            boolean isChinese = token.chars().allMatch(c -> c >= 0x4e00 && c <= 0x9fa5);
+            if (isChinese) {
+                // 中文bigram：生成重叠二元组
+                for (int i = 0; i < token.length() - 1; i++) {
+                    tokens.add(token.substring(i, i + 2));
+                }
+            } else {
+                // 英文/数字保持原词
                 tokens.add(token);
             }
         }

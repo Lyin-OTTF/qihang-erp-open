@@ -1,5 +1,9 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.agent.policy.AutonomyLevel;
+import cn.qihangerp.agent.policy.ToolPolicy;
+import cn.qihangerp.agent.tenant.TenantContext;
+
 import cn.qihangerp.model.entity.ErpPurchaseOrder;
 import cn.qihangerp.service.ErpPurchaseOrderService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -21,6 +25,7 @@ public class PurchaseTools {
     private final ErpPurchaseOrderService purchaseOrderService;
 
     @Tool(description = "查询采购单列表，可按天数和状态筛选，返回每条记录的采购单号、供应商、金额、状态、创建时间")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "采购查询")
     public String getPurchaseOrderList(
             @ToolParam(description = "查询最近多少天的采购单，默认90天") Integer days,
             @ToolParam(description = "采购单状态：0待审核 1已审核 101供应商已确认 102供应商已发货 2已收货 3已入库。不传则查全部") Integer status,
@@ -29,6 +34,10 @@ public class PurchaseTools {
         if (limit == null || limit <= 0) limit = 100;
 
         LambdaQueryWrapper<ErpPurchaseOrder> wrapper = new LambdaQueryWrapper<>();
+        Long merchantId = TenantContext.getTenantId();
+        if (merchantId != null) {
+            wrapper.eq(ErpPurchaseOrder::getMerchantId, merchantId);
+        }
         wrapper.ge(ErpPurchaseOrder::getCreateTime, LocalDateTime.now().minusDays(days));
         if (status != null) {
             wrapper.eq(ErpPurchaseOrder::getStatus, status);

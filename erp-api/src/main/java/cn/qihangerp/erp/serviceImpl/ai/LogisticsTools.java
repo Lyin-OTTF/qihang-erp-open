@@ -1,5 +1,9 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.agent.policy.AutonomyLevel;
+import cn.qihangerp.agent.policy.ToolPolicy;
+import cn.qihangerp.agent.tenant.TenantContext;
+
 import cn.qihangerp.model.entity.OOrderShipWaybill;
 import cn.qihangerp.service.OOrderShipWaybillService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -21,6 +25,7 @@ public class LogisticsTools {
     private final OOrderShipWaybillService waybillService;
 
     @Tool(description = "查询物流运单列表，可按天数和状态筛选，返回每条记录的快递单号、快递公司、订单号、状态、创建时间")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "物流查询")
     public String getWaybillList(
             @ToolParam(description = "查询最近多少天的运单，默认30天") Integer days,
             @ToolParam(description = "运单状态：1已取号 2已打印 3已发货。不传则查全部") Integer status,
@@ -29,6 +34,10 @@ public class LogisticsTools {
         if (limit == null || limit <= 0) limit = 100;
 
         LambdaQueryWrapper<OOrderShipWaybill> wrapper = new LambdaQueryWrapper<>();
+        Long merchantId = TenantContext.getTenantId();
+        if (merchantId != null) {
+            wrapper.eq(OOrderShipWaybill::getMerchantId, merchantId);
+        }
         wrapper.ge(OOrderShipWaybill::getCreateTime, LocalDateTime.now().minusDays(days));
         if (status != null) {
             wrapper.eq(OOrderShipWaybill::getStatus, status);

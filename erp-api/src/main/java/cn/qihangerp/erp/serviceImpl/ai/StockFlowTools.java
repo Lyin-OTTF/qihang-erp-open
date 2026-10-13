@@ -1,5 +1,9 @@
 package cn.qihangerp.erp.serviceImpl.ai;
 
+import cn.qihangerp.agent.policy.AutonomyLevel;
+import cn.qihangerp.agent.policy.ToolPolicy;
+import cn.qihangerp.agent.tenant.TenantContext;
+
 import cn.qihangerp.model.entity.ErpStockIn;
 import cn.qihangerp.model.entity.ErpStockOut;
 import cn.qihangerp.service.ErpStockInService;
@@ -24,6 +28,7 @@ public class StockFlowTools {
     private final ErpStockOutService stockOutService;
 
     @Tool(description = "查询入库单列表，可按天数和入库类型筛选，返回每条记录的入库单号、类型、来源单号、状态、入库时间")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "库存流水查询")
     public String getStockInList(
             @ToolParam(description = "查询最近多少天的入库单，默认30天") Integer days,
             @ToolParam(description = "入库类型：1采购入库 2退货入库。不传则查全部") Integer stockInType,
@@ -32,6 +37,10 @@ public class StockFlowTools {
         if (limit == null || limit <= 0) limit = 100;
 
         LambdaQueryWrapper<ErpStockIn> wrapper = new LambdaQueryWrapper<>();
+        Long merchantId = TenantContext.getTenantId();
+        if (merchantId != null) {
+            wrapper.eq(ErpStockIn::getMerchantId, merchantId);
+        }
         wrapper.ge(ErpStockIn::getCreateTime, LocalDateTime.now().minusDays(days));
         if (stockInType != null) {
             wrapper.eq(ErpStockIn::getStockInType, stockInType);
@@ -77,6 +86,7 @@ public class StockFlowTools {
     }
 
     @Tool(description = "查询出库单列表，可按天数和类型筛选，返回每条记录的出库单号、类型、来源单号、状态、出库时间")
+    @ToolPolicy(level = AutonomyLevel.OBSERVE, category = "库存流水查询")
     public String getStockOutList(
             @ToolParam(description = "查询最近多少天的出库单，默认30天") Integer days,
             @ToolParam(description = "出库类型：1订单发货出库 2采购退货出库 3盘点出库 4报损出库。不传则查全部") Integer type,
@@ -85,6 +95,10 @@ public class StockFlowTools {
         if (limit == null || limit <= 0) limit = 100;
 
         LambdaQueryWrapper<ErpStockOut> wrapper = new LambdaQueryWrapper<>();
+        Long merchantId = TenantContext.getTenantId();
+        if (merchantId != null) {
+            wrapper.eq(ErpStockOut::getMerchantId, merchantId);
+        }
         wrapper.ge(ErpStockOut::getCreateTime, LocalDateTime.now().minusDays(days));
         if (type != null) {
             wrapper.eq(ErpStockOut::getType, type);

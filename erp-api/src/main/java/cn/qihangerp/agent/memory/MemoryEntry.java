@@ -1,5 +1,7 @@
 package cn.qihangerp.agent.memory;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -13,6 +15,7 @@ import java.time.LocalDateTime;
  * @since 2026-10-12
  */
 @Data
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class MemoryEntry {
 
     /**
@@ -96,8 +99,9 @@ public class MemoryEntry {
     private LocalDateTime updatedAt;
 
     /**
-     * 判断是否已过期
+     * 判断是否已过期（计算属性，不参与序列化）
      */
+    @JsonIgnore
     public boolean isExpired() {
         if (expiresAt == null) {
             return false;
@@ -106,8 +110,9 @@ public class MemoryEntry {
     }
 
     /**
-     * 计算剩余TTL（秒）
+     * 计算剩余TTL（秒）（计算属性，不参与序列化）
      */
+    @JsonIgnore
     public long getRemainingTtlSeconds() {
         if (expiresAt == null) {
             return -1; // 永久
