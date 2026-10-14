@@ -5,7 +5,7 @@ spring:
   application:
     name: erp-api
   profiles:
-    active: dev
+    active: dev,agent
 
   data:
     # redis 配置
@@ -33,18 +33,30 @@ spring:
           max-wait: -1ms
   datasource:
     driverClassName: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/qihang-erp?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8
-    username: root
-    password: Andy_123
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/qihang-erp?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8}
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
     hikari:
       maximum-pool-size: 10
       min-idle: 5
       connection-timeout: 30000
       idle-timeout: 600000
       max-lifetime: 1800000
+  flyway:
+    # 启动时自动执行 db/migration 下的 V1 脚本，使 agent 表结构可在干净环境重建。
+    enabled: true
+    locations: classpath:db/migration
+    encoding: UTF-8
+    # 现有库已有业务表且无 flyway 历史，允许在已有库上建立基线，避免从头重建。
+    baseline-on-migrate: true
+    baseline-version: 1
+    # 手工执行过的脚本可能与迁移内容有差异，不强制校验，避免启动被阻断。
+    validate-on-migrate: false
+    out-of-order: false
+    table: flyway_schema_history
   ai:
     deepseek:
-      api-key: ${DEEPSEEK_API_KEY:,'aa'}
+      api-key: ${DEEPSEEK_API_KEY:}
 #  kafka:
 #    bootstrap-servers: localhost:9092
 #    producer:
@@ -101,4 +113,4 @@ deepseek:
 # Token 配置
 token:
   expireTime: 60       # Token 过期时间（分钟），默认30
-  secret: abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkrstuvwxyzabcdefghijklmnopqrstuvwxyz
+  secret: ${JWT_SECRET:}
