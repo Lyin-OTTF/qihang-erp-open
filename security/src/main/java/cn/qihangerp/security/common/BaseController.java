@@ -126,6 +126,14 @@ public class BaseController
     }
 
     /**
+     * 获取登录用户归属商户(租户)id。平台管理员可能为 null。
+     */
+    public Long getMerchantId()
+    {
+        return getLoginUser().getMerchantId();
+    }
+
+    /**
      * 获取登录用户名
      */
     public String getUsername()

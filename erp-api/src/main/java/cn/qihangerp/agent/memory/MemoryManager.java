@@ -112,6 +112,11 @@ public class MemoryManager {
         }
 
         entry.incrementAccessCount();
+        entry.setLastAccessedAt(java.time.LocalDateTime.now());
+        // 回写 access_count / last_accessed_at 到 Redis（WORKING 层纯内存无需持久化）
+        if (layer != MemoryLayer.WORKING) {
+            writeRedis(entry);
+        }
         return entry.getValue();
     }
 
@@ -137,7 +142,7 @@ public class MemoryManager {
     }
 
     /**
-     * 列出某作用域下的记忆键
+     * 列出某作用域下的记忆键（用 SCAN 替代 KEYS，避免大 keyspace 阻塞 Redis）
      */
     public List<String> listKeys(MemoryLayer layer, String scopeId, Long merchantId) {
         if (layer == MemoryLayer.WORKING) {
@@ -148,8 +153,21 @@ public class MemoryManager {
                     .collect(Collectors.toList());
         }
         String pattern = layer.name() + ":" + scopeId + ":*";
-        Set<String> keys = redisTemplate.keys(pattern);
-        if (keys == null) {
+        Set<String> keys = new HashSet<>();
+        try (org.springframework.data.redis.core.Cursor<String> cursor = redisTemplate.scan(
+                org.springframework.data.redis.core.ScanOptions.scanOptions()
+                        .match(pattern)
+                        .count(100)
+                        .build())) {
+            while (cursor.hasNext()) {
+                keys.add(cursor.next());
+            }
+        } catch (Exception e) {
+            log.warn("SCAN遍历记忆键失败（降级为KEYS）: pattern={}, error={}", pattern, e.getMessage());
+            Set<String> fallback = redisTemplate.keys(pattern);
+            if (fallback != null) keys.addAll(fallback);
+        }
+        if (keys.isEmpty()) {
             return Collections.emptyList();
         }
         return keys.stream()

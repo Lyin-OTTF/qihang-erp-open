@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.workflow;
+import org.junit.jupiter.api.Tag;
 
 import cn.qihangerp.agent.dag.DAGScheduler;
 import cn.qihangerp.agent.dag.NodeStatus;
@@ -36,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author 回溯开发-Week7-10
  * @since 2026-10-13
  */
+@Tag("it")
 class AgentWorkflowIntegrationTest {
 
     private static SqlSessionFactory sqlSessionFactory;
@@ -87,7 +89,7 @@ class AgentWorkflowIntegrationTest {
         // 并行执行能力已在DAGFrameworkTest中验证
         workflowService = new AgentWorkflowService(
                 orderMapper, refundMapper, transitionValidator, checkpointManager, objectMapper,
-                new DAGScheduler(1));
+                new DAGScheduler(1), null);
     }
 
     @AfterAll

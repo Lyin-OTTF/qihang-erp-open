@@ -127,15 +127,9 @@ public class HybridRetriever {
      * BM25检索（关键词匹配）
      */
     private List<RetrievalResult> retrieveByBM25(String query, int topK, Long merchantId) {
-        log.debug("执行BM25检索: query={}, topK={}", query, topK);
-
-        // 使用BM25Retriever进行检索
-        List<RetrievalResult> results = bm25Retriever.retrieve(query, topK);
-
-        // TODO: 添加租户隔离过滤（merchantId）
-        // 需要在agent_knowledge_chunk表中添加merchant_id字段
-
-        return results;
+        log.debug("执行BM25检索: query={}, topK={}, merchantId={}", query, topK, merchantId);
+        // BM25 索引已按 merchantId 分片，检索时传入租户ID实现隔离
+        return bm25Retriever.retrieve(query, topK, merchantId);
     }
 
     /**

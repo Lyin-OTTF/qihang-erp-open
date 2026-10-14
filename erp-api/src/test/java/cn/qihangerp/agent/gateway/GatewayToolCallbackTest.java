@@ -111,13 +111,15 @@ class GatewayToolCallbackTest {
     }
 
     @Test
-    void nullMerchantId_doesNotBreakExecution() throws Exception {
+    void nullMerchantId_isRejectedFailClosed() throws Exception {
         GatewayToolCallback cb = callbackFor("echo", String.class, Integer.class);
         ToolContext context = ctx("userId", 1L, "traceId", "t-004"); // 无 merchantId
 
         String result = cb.call("{\"message\":\"hi\",\"count\":1}", context);
 
-        assertEquals("echo:hi-1", result);
+        // 第2期 fail-closed：echo 默认需要租户隔离，缺租户应被网关拒绝，返回失败信息而非执行
+        assertTrue(result.contains("缺少租户ID") || result.contains("工具执行失败"),
+                "缺租户应被拒绝（fail-closed），实际: " + result);
     }
 
     @Test

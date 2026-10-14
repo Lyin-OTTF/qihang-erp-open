@@ -30,6 +30,10 @@ public class ChatController extends BaseController {
                 ? req.getSessionId() : UUID.randomUUID().toString();
         Long userId = getUserId();
 
+        // 会话归属校验（先于保存消息）：防止用他人 sessionId 把内容写进对方会话
+        // 新会话查不到记录不会抛异常；已有会话但不属于当前用户会直接拒绝
+        historyService.getConversationForUser(sessionId, userId);
+
         historyService.saveMessage(sessionId, userId, "user", req.getMessage());
 
         AiConfig config = aiConfigService.getDefaultConfig();
@@ -44,7 +48,7 @@ public class ChatController extends BaseController {
 
     @GetMapping("/chat/history")
     public AjaxResult getHistory(@RequestParam String sessionId) {
-        List<AiConversationHistory> list = historyService.getConversation(sessionId);
+        List<AiConversationHistory> list = historyService.getConversationForUser(sessionId, getUserId());
         return AjaxResult.success(list);
     }
 

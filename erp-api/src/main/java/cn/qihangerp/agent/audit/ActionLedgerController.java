@@ -24,6 +24,7 @@ import java.util.List;
 public class ActionLedgerController {
 
     private final ActionLedgerService actionLedgerService;
+    private final cn.qihangerp.agent.tenant.TenantAuthorizer tenantAuthorizer;
 
     /**
      * 根据traceId查询审计日志
@@ -32,6 +33,10 @@ public class ActionLedgerController {
     @GetMapping("/trace/{traceId}")
     public R<List<ActionLedger>> getByTraceId(@PathVariable String traceId) {
         List<ActionLedger> list = actionLedgerService.getByTraceId(traceId);
+        Long bound = tenantAuthorizer.currentTenant();
+        if (bound != null) {
+            list = list.stream().filter(e -> bound.equals(e.getMerchantId())).toList();
+        }
         return R.ok(list);
     }
 
@@ -44,7 +49,8 @@ public class ActionLedgerController {
             @PathVariable Long merchantId,
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "20") int pageSize) {
-        Page<ActionLedger> page = actionLedgerService.getByMerchantId(merchantId, pageNum, pageSize);
+        Long effectiveTenant = tenantAuthorizer.requireTenant(merchantId);
+        Page<ActionLedger> page = actionLedgerService.getByMerchantId(effectiveTenant, pageNum, pageSize);
         return R.ok(page);
     }
 
@@ -57,6 +63,13 @@ public class ActionLedgerController {
             @PathVariable Long userId,
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "20") int pageSize) {
+        Long bound = tenantAuthorizer.currentTenant();
+        if (bound != null) {
+            Page<ActionLedger> page = actionLedgerService.getByUserId(userId, pageNum, pageSize);
+            // 仅返回本租户数据
+            page.setRecords(page.getRecords().stream().filter(e -> bound.equals(e.getMerchantId())).toList());
+            return R.ok(page);
+        }
         Page<ActionLedger> page = actionLedgerService.getByUserId(userId, pageNum, pageSize);
         return R.ok(page);
     }
@@ -70,7 +83,8 @@ public class ActionLedgerController {
             @RequestParam(required = false) Long merchantId,
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "20") int pageSize) {
-        Page<ActionLedger> page = actionLedgerService.getFailedActions(merchantId, pageNum, pageSize);
+        Long effectiveTenant = tenantAuthorizer.requireTenant(merchantId);
+        Page<ActionLedger> page = actionLedgerService.getFailedActions(effectiveTenant, pageNum, pageSize);
         return R.ok(page);
     }
 
@@ -80,12 +94,13 @@ public class ActionLedgerController {
     @Operation(summary = "查询需要审批的操作")
     @GetMapping("/approval")
     public R<Page<ActionLedger>> getApprovalActions(
-            @RequestParam Long merchantId,
+            @RequestParam(required = false) Long merchantId,
             @RequestParam(required = false) Boolean approved,
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "20") int pageSize) {
+        Long effectiveTenant = tenantAuthorizer.requireTenant(merchantId);
         Page<ActionLedger> page = actionLedgerService.getApprovalActions(
-                merchantId, approved, pageNum, pageSize);
+                effectiveTenant, approved, pageNum, pageSize);
         return R.ok(page);
     }
 
@@ -97,7 +112,8 @@ public class ActionLedgerController {
     public R<Double> getSuccessRate(
             @RequestParam(required = false) String toolName,
             @RequestParam(required = false) Long merchantId) {
-        double rate = actionLedgerService.calculateSuccessRate(toolName, merchantId);
+        Long effectiveTenant = tenantAuthorizer.requireTenant(merchantId);
+        double rate = actionLedgerService.calculateSuccessRate(toolName, effectiveTenant);
         return R.ok(rate);
     }
 }

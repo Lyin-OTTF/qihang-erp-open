@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.trace;
+import org.junit.jupiter.api.Tag;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.MybatisSqlSessionFactoryBuilder;
@@ -6,6 +7,7 @@ import com.mysql.cj.jdbc.MysqlDataSource;
 import org.apache.ibatis.mapping.Environment;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mybatis.spring.SqlSessionTemplate;
@@ -20,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * TraceService真实DB集成测试。
  * 验证agent_trace表的CRUD和查询能力。
  */
+@Tag("it")
 class TraceServiceIntegrationTest {
 
     private TraceService traceService;
@@ -48,6 +51,12 @@ class TraceServiceIntegrationTest {
         traceService = new TraceService(traceMapper);
 
         testTraceId = "test-trace-" + System.currentTimeMillis();
+    }
+
+    @AfterEach
+    void tearDown() {
+        // 清理本次测试写入的 trace，避免污染 agent_trace
+        jdbcTemplate.update("DELETE FROM agent_trace WHERE trace_id LIKE ?", testTraceId + "%");
     }
 
     @Test

@@ -8,12 +8,14 @@ import cn.qihangerp.erp.serviceImpl.ai.GoodsTools;
 import cn.qihangerp.erp.serviceImpl.ai.InventoryTools;
 import cn.qihangerp.erp.serviceImpl.ai.MemberTools;
 import cn.qihangerp.erp.serviceImpl.ai.OrderTools;
+import cn.qihangerp.erp.serviceImpl.ai.OrderActionTools;
 import cn.qihangerp.erp.serviceImpl.ai.LogisticsTools;
 import cn.qihangerp.erp.serviceImpl.ai.PurchaseTools;
 import cn.qihangerp.erp.serviceImpl.ai.RefundTools;
 import cn.qihangerp.erp.serviceImpl.ai.ShopTools;
 import cn.qihangerp.erp.serviceImpl.ai.StockFlowTools;
 import cn.qihangerp.erp.serviceImpl.ai.SupplierTools;
+import cn.qihangerp.erp.serviceImpl.ai.SuggestionTools;
 import cn.qihangerp.erp.serviceImpl.ai.WarehouseTools;
 import cn.qihangerp.model.entity.AiConfig;
 import cn.qihangerp.model.entity.AiConversationHistory;
@@ -55,6 +57,8 @@ public class ChatService {
     private final LogisticsTools logisticsTools;
     private final WarehouseTools warehouseTools;
     private final StockFlowTools stockFlowTools;
+    private final OrderActionTools orderActionTools;
+    private final SuggestionTools suggestionTools;
 
     private static final String SYSTEM_PROMPT = """
             你是启航电商ERP系统的AI助手，帮助用户处理电商运营、订单管理、商品管理、库存管理、采购管理、仓库管理、售后管理等方面的问题。请用专业、简洁的中文回答。
@@ -119,12 +123,29 @@ public class ChatService {
         return s.length() > max ? s.substring(0, max) + "..." : s;
     }
 
+    /**
+     * 解析当前租户（权威来源为登录态）。
+     * 工具实际在 reactor 线程执行，ThreadLocal 无法跨线程，故必须在请求线程把登录态租户取定并透传。
+     */
+    private Long resolveMerchantId() {
+        try {
+            cn.qihangerp.security.LoginUser loginUser =
+                    cn.qihangerp.security.common.SecurityUtils.getLoginUser();
+            if (loginUser != null && loginUser.getMerchantId() != null) {
+                return loginUser.getMerchantId();
+            }
+        } catch (Exception e) {
+            log.debug("从登录态取租户失败，回退 TenantContext: {}", e.getMessage());
+        }
+        return TenantContext.getTenantId();
+    }
+
     public void streamResponse(AiConfig config, SseEmitter emitter, String sessionId, Long userId) {
         try {
-            List<AiConversationHistory> history = historyService.getConversation(sessionId);
+            List<AiConversationHistory> history = historyService.getConversationForUser(sessionId, userId);
 
-            // 在请求线程上读取租户ID（由 TenantInterceptor 从 Header/参数注入）
-            Long merchantId = TenantContext.getTenantId();
+            // 租户ID权威来源：登录态（拦截器已把登录态租户写入 TenantContext，此处再直接从登录态取，双重保障）
+            Long merchantId = resolveMerchantId();
 
             // 读取记忆上下文，注入到系统提示
             String memoryContext = buildMemoryContext(sessionId, userId, merchantId);
@@ -143,8 +164,9 @@ public class ChatService {
                 }
             }
 
-            // 生成 traceId，一并放入 toolContext，随 ChatClient 透传到每次工具调用
-            String traceId = UUID.randomUUID().toString();
+            // traceId 会话级稳定：以 sessionId 为审批匹配键，使用户"批准后重发"能命中已有审批；
+            // sessionId 为空时回退到 UUID（单次对话无审批闭环）。
+            String traceId = sessionId != null ? sessionId : UUID.randomUUID().toString();
             Map<String, Object> toolContext = new HashMap<>();
             toolContext.put("merchantId", merchantId);
             toolContext.put("userId", userId);
@@ -154,7 +176,7 @@ public class ChatService {
             toolContext.put("source", "WebUI");
             log.info("AI对话 sessionId={} userId={} merchantId={} traceId={}", sessionId, userId, merchantId, traceId);
 
-            ChatClient chatClient = orchestrationService.buildChatClient(config, toolContext, goodsTools, orderTools, refundTools, inventoryTools, shopTools, purchaseTools, memberTools, supplierTools, logisticsTools, warehouseTools, stockFlowTools);
+            ChatClient chatClient = orchestrationService.buildChatClient(config, toolContext, goodsTools, orderTools, orderActionTools, refundTools, inventoryTools, shopTools, purchaseTools, memberTools, supplierTools, logisticsTools, warehouseTools, stockFlowTools, suggestionTools);
 
             StringBuilder fullResponse = new StringBuilder();
 

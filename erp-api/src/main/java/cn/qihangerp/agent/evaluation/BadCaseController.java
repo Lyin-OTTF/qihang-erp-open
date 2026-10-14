@@ -27,6 +27,7 @@ import java.util.Map;
 public class BadCaseController {
 
     private final BadCaseService badCaseService;
+    private final cn.qihangerp.agent.tenant.TenantAuthorizer tenantAuthorizer;
 
     /**
      * 提交 Bad Case 反馈
@@ -34,6 +35,8 @@ public class BadCaseController {
     @Operation(summary = "提交Bad Case反馈")
     @PostMapping("/submit")
     public R<Long> submit(@RequestBody BadCase badCase) {
+        Long tenant = tenantAuthorizer.authorize(badCase.getMerchantId());
+        badCase.setMerchantId(tenant);
         Long id = badCaseService.submit(badCase);
         return R.ok(id);
     }
@@ -45,6 +48,10 @@ public class BadCaseController {
     @GetMapping("/{id}")
     public R<BadCase> getById(@PathVariable Long id) {
         BadCase badCase = badCaseService.getById(id);
+        Long bound = tenantAuthorizer.currentTenant();
+        if (bound != null && badCase != null && !bound.equals(badCase.getMerchantId())) {
+            throw new org.springframework.security.access.AccessDeniedException("禁止访问其他租户的数据");
+        }
         return R.ok(badCase);
     }
 
@@ -57,7 +64,8 @@ public class BadCaseController {
             @PathVariable Long merchantId,
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "20") int pageSize) {
-        Page<BadCase> page = badCaseService.getByMerchantId(merchantId, pageNum, pageSize);
+        Long effectiveTenant = tenantAuthorizer.requireTenant(merchantId);
+        Page<BadCase> page = badCaseService.getByMerchantId(effectiveTenant, pageNum, pageSize);
         return R.ok(page);
     }
 
@@ -70,7 +78,11 @@ public class BadCaseController {
             @PathVariable String status,
             @RequestParam(defaultValue = "1") int pageNum,
             @RequestParam(defaultValue = "20") int pageSize) {
+        Long bound = tenantAuthorizer.currentTenant();
         Page<BadCase> page = badCaseService.getByStatus(status, pageNum, pageSize);
+        if (bound != null) {
+            page.setRecords(page.getRecords().stream().filter(e -> bound.equals(e.getMerchantId())).toList());
+        }
         return R.ok(page);
     }
 
@@ -80,7 +92,8 @@ public class BadCaseController {
     @Operation(summary = "按反馈类型统计数量")
     @GetMapping("/stats")
     public R<Map<String, Long>> getStats(@RequestParam(required = false) Long merchantId) {
-        Map<String, Long> stats = badCaseService.countByFeedbackType(merchantId);
+        Long effectiveTenant = tenantAuthorizer.authorize(merchantId);
+        Map<String, Long> stats = badCaseService.countByFeedbackType(effectiveTenant);
         return R.ok(stats);
     }
 
@@ -94,7 +107,8 @@ public class BadCaseController {
             @RequestParam String status,
             @RequestParam(required = false) String resolution,
             @RequestParam(required = false) Long resolvedBy) {
-        boolean success = badCaseService.updateStatus(id, status, resolution, resolvedBy);
+        Long resolvedByUser = cn.qihangerp.security.common.SecurityUtils.getUserId();
+        boolean success = badCaseService.updateStatus(id, status, resolution, resolvedByUser);
         return R.ok(success);
     }
 
@@ -105,6 +119,10 @@ public class BadCaseController {
     @GetMapping("/trace/{traceId}")
     public R<List<BadCase>> getByTraceId(@PathVariable String traceId) {
         List<BadCase> list = badCaseService.getByTraceId(traceId);
+        Long bound = tenantAuthorizer.currentTenant();
+        if (bound != null) {
+            list = list.stream().filter(e -> bound.equals(e.getMerchantId())).toList();
+        }
         return R.ok(list);
     }
 }

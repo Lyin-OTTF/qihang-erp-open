@@ -42,16 +42,22 @@ public class RagEvaluationScheduler {
 
             long duration = System.currentTimeMillis() - startTime;
             log.info("========== 每日RAG离线评测完成 ==========");
-            log.info("总用例: {}, 通过: {}, 通过率: {:.2f}%",
-                    report.getTotalCases(), report.getPassedCases(), report.getPassRate());
-            log.info("平均Recall: {:.4f}, Precision: {:.4f}, F1: {:.4f}, MRR: {:.4f}, NDCG: {:.4f}",
-                    report.getAvgRecall(), report.getAvgPrecision(), report.getAvgF1(),
-                    report.getAvgMRR(), report.getAvgNDCG());
-            log.info("平均综合评分: {:.2f}, 总耗时: {}ms", report.getAvgOverallScore(), duration);
+            log.info("总用例: {}, 通过: {}, 通过率: {}%",
+                    report.getTotalCases(), report.getPassedCases(),
+                    String.format("%.2f", report.getPassRate()));
+            log.info("平均Recall: {}, Precision: {}, F1: {}, MRR: {}, NDCG: {}",
+                    String.format("%.4f", report.getAvgRecall()),
+                    String.format("%.4f", report.getAvgPrecision()),
+                    String.format("%.4f", report.getAvgF1()),
+                    String.format("%.4f", report.getAvgMRR()),
+                    String.format("%.4f", report.getAvgNDCG()));
+            log.info("平均综合评分: {}, 总耗时: {}ms",
+                    String.format("%.2f", report.getAvgOverallScore()), duration);
 
             // 通过率低于阈值时告警
             if (report.getPassRate() < 60.0) {
-                log.warn("RAG评测通过率低于60%阈值: {:.2f}%，请检查检索质量和知识库内容", report.getPassRate());
+                log.warn("RAG评测通过率低于60%阈值: {}%，请检查检索质量和知识库内容",
+                        String.format("%.2f", report.getPassRate()));
             }
         } catch (Exception e) {
             log.error("每日RAG离线评测失败: {}", e.getMessage(), e);

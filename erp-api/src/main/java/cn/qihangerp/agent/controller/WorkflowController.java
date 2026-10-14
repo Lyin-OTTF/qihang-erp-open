@@ -22,9 +22,12 @@ import java.util.Map;
 public class WorkflowController {
 
     private final AgentWorkflowService workflowService;
+    private final cn.qihangerp.agent.tenant.TenantAuthorizer tenantAuthorizer;
 
-    public WorkflowController(AgentWorkflowService workflowService) {
+    public WorkflowController(AgentWorkflowService workflowService,
+                              cn.qihangerp.agent.tenant.TenantAuthorizer tenantAuthorizer) {
         this.workflowService = workflowService;
+        this.tenantAuthorizer = tenantAuthorizer;
     }
 
     /**
@@ -36,7 +39,7 @@ public class WorkflowController {
     public AjaxResult executeAfterSales(@RequestBody Map<String, Object> body) {
         Long orderId = toLong(body.get("orderId"));
         Long refundId = toLong(body.get("refundId"));
-        Long merchantId = toLong(body.getOrDefault("merchantId", 1L));
+        Long merchantId = tenantAuthorizer.requireTenant(toLong(body.get("merchantId")));
 
         if (orderId == null || refundId == null) {
             return AjaxResult.error("orderId和refundId必填");

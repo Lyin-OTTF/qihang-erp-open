@@ -1,83 +1,70 @@
 package cn.qihangerp.agent.tenant;
 
+import cn.qihangerp.security.LoginUser;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 /**
- * 租户拦截器 - 自动从请求中提取租户ID并设置到TenantContext
+ * 租户拦截器 —— 租户ID只从"登录态"获取，不再由客户端说了算。
  *
- * 支持多种方式传递租户ID：
- * 1. HTTP Header: X-Tenant-Id
- * 2. 请求参数: merchantId
- * 3. Spring Security上下文（TODO: 待实现）
+ * <p>规则（第2期 堵越权）：</p>
+ * <ol>
+ *   <li>普通商户用户：租户 = 登录用户绑定的 merchant_id，{@code X-Tenant-Id} 请求头一律忽略（防水平越权）。</li>
+ *   <li>平台管理员（merchant_id 为 null）：默认无租户（可跨租户，由后端显式逻辑控制）；
+ *       仅对其允许通过 {@code X-Tenant-Id} 显式指定要查看的商户（受信任主体的受控覆盖）。</li>
+ * </ol>
  *
- * @author AI Code Generator
- * @since 2026-10-12
+ * <p>注意：本拦截器必须通过 {@link TenantWebMvcConfig} 注册到拦截器链才会生效。</p>
  */
 @Component
 public class TenantInterceptor implements HandlerInterceptor {
     private static final Logger log = LoggerFactory.getLogger(TenantInterceptor.class);
 
-    /**
-     * HTTP Header名称
-     */
     private static final String TENANT_ID_HEADER = "X-Tenant-Id";
-
-    /**
-     * 请求参数名称
-     */
-    private static final String TENANT_ID_PARAM = "merchantId";
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        // 方式1: 从HTTP Header获取
-        String tenantIdHeader = request.getHeader(TENANT_ID_HEADER);
-        if (tenantIdHeader != null && !tenantIdHeader.isEmpty()) {
-            try {
-                Long tenantId = Long.parseLong(tenantIdHeader);
-                TenantContext.setTenantId(tenantId);
-                log.debug("从Header提取租户ID: {}", tenantId);
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+        if (authentication != null && authentication.isAuthenticated()
+                && authentication.getPrincipal() instanceof LoginUser loginUser) {
+            Long boundMerchantId = loginUser.getMerchantId();
+
+            if (boundMerchantId != null) {
+                // 普通商户用户：只信绑定租户，忽略客户端传入的 X-Tenant-Id
+                TenantContext.setTenantId(boundMerchantId);
+                log.debug("租户来自登录态: userId={} merchantId={}", loginUser.getUserId(), boundMerchantId);
                 return true;
-            } catch (NumberFormatException e) {
-                log.warn("Header中的租户ID格式错误: {}", tenantIdHeader);
             }
+
+            // 平台管理员：允许受控地用 X-Tenant-Id 指定商户，否则无租户
+            String header = request.getHeader(TENANT_ID_HEADER);
+            if (header != null && !header.isEmpty()) {
+                try {
+                    TenantContext.setTenantId(Long.parseLong(header));
+                    log.debug("平台管理员显式指定租户: {}", TenantContext.getTenantId());
+                } catch (NumberFormatException e) {
+                    log.warn("平台管理员传入的 X-Tenant-Id 格式错误: {}", header);
+                }
+            }
+            return true;
         }
 
-        // 方式2: 从请求参数获取
-        String tenantIdParam = request.getParameter(TENANT_ID_PARAM);
-        if (tenantIdParam != null && !tenantIdParam.isEmpty()) {
-            try {
-                Long tenantId = Long.parseLong(tenantIdParam);
-                TenantContext.setTenantId(tenantId);
-                log.debug("从请求参数提取租户ID: {}", tenantId);
-                return true;
-            } catch (NumberFormatException e) {
-                log.warn("请求参数中的租户ID格式错误: {}", tenantIdParam);
-            }
-        }
-
-        // 方式3: 从Spring Security上下文获取（TODO: 待实现）
-        // Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        // if (authentication != null && authentication.getPrincipal() instanceof UserDetails) {
-        //     UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        //     Long tenantId = extractTenantIdFromUserDetails(userDetails);
-        //     TenantContext.setTenantId(tenantId);
-        //     return true;
-        // }
-
-        // 未提取到租户ID，打印警告但不阻止请求
-        log.debug("请求未携带租户ID: {} {}", request.getMethod(), request.getRequestURI());
+        // 未认证（理论上被 SecurityConfig 的 anyRequest().authenticated() 拦截，到这里属于极少数放行路径）
+        // 不设置任何租户，交由下游按 fail-closed 处理。
+        log.debug("未认证请求，不注入租户: {} {}", request.getMethod(), request.getRequestURI());
         return true;
     }
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
                                 Object handler, Exception ex) {
-        // 请求完成后清除租户上下文，防止线程池复用导致的数据泄露
         TenantContext.clear();
     }
 }

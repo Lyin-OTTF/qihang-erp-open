@@ -1,8 +1,20 @@
 -- V1_24_0: PGVector MySQL降级 + 离线评测结果持久化（搁置项攻关-任务14/18）
 
--- 1. 为rag_document.content添加FULLTEXT索引，作为PGVector不可用时的语义检索降级方案
+-- 1. 为rag_document.content添加FULLTEXT索引（幂等：用 information_schema 守卫，已存在则跳过）
 -- MySQL MATCH AGAINST 支持中文（ngram分词器，MySQL 5.7+内置）
-ALTER TABLE `rag_document` ADD FULLTEXT INDEX `ft_content` (`content`) WITH PARSER ngram;
+DROP PROCEDURE IF EXISTS agent_add_ft_index;
+DELIMITER //
+CREATE PROCEDURE agent_add_ft_index()
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.STATISTICS
+                   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rag_document'
+                     AND INDEX_NAME = 'ft_content') THEN
+        ALTER TABLE `rag_document` ADD FULLTEXT INDEX `ft_content` (`content`) WITH PARSER ngram;
+    END IF;
+END //
+DELIMITER ;
+CALL agent_add_ft_index();
+DROP PROCEDURE IF EXISTS agent_add_ft_index;
 
 -- 2. 离线评测结果表：存储每次RAG评测的聚合指标，支持历史趋势分析
 CREATE TABLE IF NOT EXISTS `agent_rag_eval_result` (

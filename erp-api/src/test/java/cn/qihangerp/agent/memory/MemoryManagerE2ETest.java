@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.memory;
+import org.junit.jupiter.api.Tag;
 
 import com.mysql.cj.jdbc.MysqlDataSource;
 import org.junit.jupiter.api.AfterAll;
@@ -21,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author 回溯开发-阶段3
  * @since 2026-10-12
  */
+@Tag("it")
 class MemoryManagerE2ETest {
 
     private static final String TEST_PREFIX = "mgr-e2e-" + System.currentTimeMillis();

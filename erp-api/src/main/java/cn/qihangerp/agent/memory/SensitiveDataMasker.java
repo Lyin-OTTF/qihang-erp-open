@@ -22,7 +22,8 @@ public class SensitiveDataMasker {
 
     // 正则表达式
     private static final Pattern PHONE_PATTERN = Pattern.compile("(1[3-9]\\d)(\\d{4})(\\d{4})");
-    private static final Pattern ID_CARD_PATTERN = Pattern.compile("(\\d{6})(\\d{8})(\\d{4})");
+    private static final Pattern ID_CARD_18_PATTERN = Pattern.compile("(\\d{6})(\\d{8})(\\d{4})");
+    private static final Pattern ID_CARD_15_PATTERN = Pattern.compile("(\\d{6})(\\d{6})(\\d{3})");
     private static final Pattern BANK_CARD_PATTERN = Pattern.compile("(\\d{4})(\\d{8,12})(\\d{4})");
     private static final Pattern EMAIL_PATTERN = Pattern.compile("([a-zA-Z0-9]{1,3})[a-zA-Z0-9._-]*@");
     private static final Pattern NAME_PATTERN = Pattern.compile("([\\u4e00-\\u9fa5]{1})([\\u4e00-\\u9fa5]+)");
@@ -40,15 +41,19 @@ public class SensitiveDataMasker {
     }
 
     /**
-     * 脱敏身份证
+     * 脱敏身份证（支持18位和15位旧版）
      *
      * 示例：110101199001011234 -> 110101******1234
+     *       110101900101123  -> 110101******123
      */
     public static String maskIdCard(String idCard) {
         if (idCard == null || (idCard.length() != 15 && idCard.length() != 18)) {
             return idCard;
         }
-        return ID_CARD_PATTERN.matcher(idCard).replaceAll("$1******$3");
+        if (idCard.length() == 15) {
+            return ID_CARD_15_PATTERN.matcher(idCard).replaceAll("$1******$3");
+        }
+        return ID_CARD_18_PATTERN.matcher(idCard).replaceAll("$1******$3");
     }
 
     /**
@@ -101,7 +106,8 @@ public class SensitiveDataMasker {
 
         // 按优先级脱敏
         result = PHONE_PATTERN.matcher(result).replaceAll("$1****$3");
-        result = ID_CARD_PATTERN.matcher(result).replaceAll("$1******$3");
+        result = ID_CARD_18_PATTERN.matcher(result).replaceAll("$1******$3");
+        result = ID_CARD_15_PATTERN.matcher(result).replaceAll("$1******$3");
         result = BANK_CARD_PATTERN.matcher(result).replaceAll("$1 **** **** $3");
         result = EMAIL_PATTERN.matcher(result).replaceAll("$1***@");
 
@@ -117,7 +123,8 @@ public class SensitiveDataMasker {
         }
 
         return PHONE_PATTERN.matcher(text).find()
-                || ID_CARD_PATTERN.matcher(text).find()
+                || ID_CARD_18_PATTERN.matcher(text).find()
+                || ID_CARD_15_PATTERN.matcher(text).find()
                 || BANK_CARD_PATTERN.matcher(text).find()
                 || EMAIL_PATTERN.matcher(text).find();
     }

@@ -4,7 +4,14 @@
 -- 注意: relevant_chunks 引用的chunk_id为示例标识，实际RAG系统需导入对应文档后才能命中
 -- 本批为starter set（24条），后续可根据真实客服对话持续扩充
 
-INSERT INTO `agent_rag_evaluation` (`merchant_id`, `question`, `expected_answer`, `relevant_chunks`, `domain`, `difficulty`) VALUES
+-- 幂等护栏：agent_rag_evaluation 无唯一键，先为 (merchant_id, question) 补唯一键（已存在则跳过），
+-- 使本脚本及后续 V1_22_0 可用 INSERT IGNORE 在已有数据的库上去重，避免重复写入。
+SET @s = (SELECT IF(COUNT(*)=0,
+  'ALTER TABLE agent_rag_evaluation ADD UNIQUE KEY uk_merchant_question (merchant_id, question(60))',
+  'SELECT 1') FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='agent_rag_evaluation' AND index_name='uk_merchant_question');
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
+
+INSERT IGNORE INTO `agent_rag_evaluation` (`merchant_id`, `question`, `expected_answer`, `relevant_chunks`, `domain`, `difficulty`) VALUES
 -- ===== 订单领域 (order) =====
 (1, '客户要求取消已付款的订单怎么处理？', '已付款订单需先申请退款，经售后审核通过后订单自动取消；未发货订单可直接取消，已发货订单需走退货退款流程。', '["order_cancel_001","order_refund_001"]', 'order', 'easy'),
 (1, '订单状态有哪些？分别代表什么含义？', '订单状态包括：0新订单、1待发货、2已发货、3已完成、11已取消、12退款中、13已关闭、21待付款、22锁定、29删除、101部分发货。', '["order_status_001"]', 'order', 'easy'),

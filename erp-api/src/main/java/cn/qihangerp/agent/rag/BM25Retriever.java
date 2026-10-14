@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -40,25 +41,28 @@ public class BM25Retriever {
     // 中文分词正则（简化实现，生产环境使用jieba或HanLP）
     private static final Pattern WORD_PATTERN = Pattern.compile("[\\u4e00-\\u9fa5]+|[a-zA-Z0-9]+");
 
-    // 倒排索引（内存实现，生产环境存MySQL agent_bm25_index表）
+    // 倒排索引（内存实现，ConcurrentHashMap 保证线程安全）
     // chunkId -> 词频映射
-    private final Map<String, Map<String, Integer>> invertedIndex = new HashMap<>();
+    private final Map<String, Map<String, Integer>> invertedIndex = new ConcurrentHashMap<>();
     // chunkId -> chunk内容
-    private final Map<String, String> chunkContent = new HashMap<>();
+    private final Map<String, String> chunkContent = new ConcurrentHashMap<>();
+    // chunkId -> merchantId（用于租户过滤）
+    private final Map<String, Long> chunkMerchant = new ConcurrentHashMap<>();
     // 文档频率（term -> 包含该term的chunk数量）
-    private final Map<String, Integer> documentFrequency = new HashMap<>();
+    private final Map<String, Integer> documentFrequency = new ConcurrentHashMap<>();
     // 平均文档长度
     private double avgDocLength = 0.0;
     // 总文档数
     private int totalDocs = 0;
 
     /**
-     * 索引文档
+     * 索引文档（带租户ID）
      *
      * @param chunkId chunk唯一标识
      * @param content chunk内容
+     * @param merchantId 商户ID（用于检索时租户隔离）
      */
-    public void indexDocument(String chunkId, String content) {
+    public void indexDocument(String chunkId, String content, Long merchantId) {
         // 分词
         List<String> terms = tokenize(content);
 
@@ -71,10 +75,13 @@ public class BM25Retriever {
         // 更新倒排索引
         invertedIndex.put(chunkId, termFreq);
         chunkContent.put(chunkId, content);
+        if (merchantId != null) {
+            chunkMerchant.put(chunkId, merchantId);
+        }
 
         // 更新文档频率
         for (String term : termFreq.keySet()) {
-            documentFrequency.put(term, documentFrequency.getOrDefault(term, 0) + 1);
+            documentFrequency.merge(term, 1, Integer::sum);
         }
 
         // 更新统计信息
@@ -84,23 +91,38 @@ public class BM25Retriever {
                 .average()
                 .orElse(0.0);
 
-        log.debug("文档已索引: chunkId={}, terms={}", chunkId, terms.size());
+        log.debug("文档已索引: chunkId={}, merchantId={}, terms={}", chunkId, merchantId, terms.size());
     }
 
     /**
-     * BM25检索
+     * 索引文档（兼容旧调用，merchantId=null 表示全租户共享）
+     */
+    public void indexDocument(String chunkId, String content) {
+        indexDocument(chunkId, content, null);
+    }
+
+    /**
+     * BM25检索（带租户过滤）
      *
      * @param query 查询问题
      * @param topK  返回数量
+     * @param merchantId 商户ID（null表示不过滤）
      * @return 检索结果列表（按BM25分数降序）
      */
-    public List<RetrievalResult> retrieve(String query, int topK) {
+    public List<RetrievalResult> retrieve(String query, int topK, Long merchantId) {
         // 查询分词
         List<String> queryTerms = tokenize(query);
 
-        // 计算每个chunk的BM25分数
+        // 计算每个chunk的BM25分数（租户过滤）
         Map<String, Double> scores = new HashMap<>();
         for (String chunkId : invertedIndex.keySet()) {
+            // 租户过滤：如果指定了merchantId，只检索该商户的文档
+            if (merchantId != null) {
+                Long docMerchant = chunkMerchant.get(chunkId);
+                if (docMerchant != null && !docMerchant.equals(merchantId)) {
+                    continue;
+                }
+            }
             double bm25Score = calculateBM25(queryTerms, chunkId);
             if (bm25Score > 0) {
                 scores.put(chunkId, bm25Score);
@@ -119,8 +141,15 @@ public class BM25Retriever {
                 })
                 .collect(Collectors.toList());
 
-        log.info("BM25检索完成: query={}, topK={}, matched={}", query, topK, results.size());
+        log.info("BM25检索完成: query={}, topK={}, merchantId={}, matched={}", query, topK, merchantId, results.size());
         return results;
+    }
+
+    /**
+     * BM25检索（兼容旧调用，无租户过滤）
+     */
+    public List<RetrievalResult> retrieve(String query, int topK) {
+        return retrieve(query, topK, null);
     }
 
     /**

@@ -107,6 +107,18 @@ agent:
     default-level: SUGGEST
     approval-timeout: 300
 
+  # 向量存储开关（PGVector）
+  # true: 启用，需要PostgreSQL+pgvector容器运行（Docker: pgvector）
+  # false: 禁用，应用不依赖PostgreSQL，检索降级为 MySQL FULLTEXT → BM25
+  vector-store:
+    enabled: false
+    host: localhost
+    port: 5432
+    database: erp_vector
+    username: postgres
+    password: "1234"
+    dimensions: 1024
+
   # RAG配置
   rag:
     retrieval-top-k: 10
@@ -128,3 +140,5 @@ agent:
     schedule: "0 0 2 * * SUN"  # 每周日凌晨2点跑评测
     recall-target: 0.8
     mrr-target: 0.7
+    llm-enabled: false          # 真实LLM质量打分开关，开启后产生API费用且评测耗时变长
+    llm-timeout-seconds: 60

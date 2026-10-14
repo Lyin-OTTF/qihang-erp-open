@@ -30,6 +30,7 @@ public class RagEvaluator {
     private final JdbcTemplate jdbcTemplate;
     private final HybridRetriever hybridRetriever;
     private final CitationGenerator citationGenerator;
+    private final LlmEvaluationService llmEvaluationService;
 
     /**
      * 运行完整评测并持久化结果
@@ -77,7 +78,7 @@ public class RagEvaluator {
                     topK,
                     "HYBRID",
                     remark);
-            log.info("评测结果已持久化: merchantId={}, passRate={:.2f}%", merchantId, report.getPassRate());
+            log.info("评测结果已持久化: merchantId={}, passRate={}%", merchantId, String.format("%.2f", report.getPassRate()));
         } catch (Exception e) {
             log.error("持久化评测结果失败: {}", e.getMessage(), e);
         }
@@ -132,8 +133,8 @@ public class RagEvaluator {
         RagEvaluationReport report = aggregateMetrics(metricsList, cases.size(), passedCount);
         report.setTotalTime(System.currentTimeMillis() - startTime);
 
-        log.info("RAG离线评测完成: 总用例={}, 通过={}, 通过率={:.2f}%",
-                cases.size(), passedCount, report.getPassRate());
+        log.info("RAG离线评测完成: 总用例={}, 通过={}, 通过率={}%",
+                cases.size(), passedCount, String.format("%.2f", report.getPassRate()));
 
         return report;
     }
@@ -160,17 +161,44 @@ public class RagEvaluator {
         );
         metrics.setRetrieval(retrievalMetrics);
 
-        // 步骤2: 生成评测（模拟，实际需要调用LLM）
+        // 步骤2: 生成评测（LLM启用时调用真实大模型，否则用启发式拼接）
         long generationStart = System.currentTimeMillis();
-        String generatedAnswer = generateAnswer(retrievalResults, testCase.getQuestion());
+        String generatedAnswer = null;
+        boolean llmUsed = false;
+        if (llmEvaluationService != null && llmEvaluationService.isLlmEnabled()) {
+            generatedAnswer = llmEvaluationService.generateAnswer(testCase.getQuestion(), retrievalResults);
+            if (generatedAnswer != null) llmUsed = true;
+        }
+        if (generatedAnswer == null) {
+            generatedAnswer = generateAnswer(retrievalResults, testCase.getQuestion());
+        }
         long generationTime = System.currentTimeMillis() - generationStart;
 
-        RagEvaluationMetrics.GenerationMetrics generationMetrics = evaluateGeneration(
-                generatedAnswer,
-                testCase.getExpectedAnswer(),
-                retrievalResults,
-                generationTime
-        );
+        // 步骤2.5: 生成质量打分（LLM启用时用LLM-as-judge，否则用启发式）
+        RagEvaluationMetrics.GenerationMetrics generationMetrics;
+        if (llmUsed && llmEvaluationService != null) {
+            double[] scores = llmEvaluationService.judgeAnswer(
+                    testCase.getQuestion(), testCase.getExpectedAnswer(),
+                    generatedAnswer, retrievalResults);
+            if (scores != null) {
+                generationMetrics = new RagEvaluationMetrics.GenerationMetrics();
+                generationMetrics.setGenerationTime(generationTime);
+                generationMetrics.setAnswerRelevancy(scores[0]);
+                generationMetrics.setAnswerCorrectness(scores[1]);
+                generationMetrics.setFaithfulness(scores[2]);
+                // LLM打分时上下文利用率和BLEU/ROUGE仍用启发式补充
+                generationMetrics.setContextUtilization(calculateContextUtilization(generatedAnswer, retrievalResults));
+                generationMetrics.setBleuScore(calculateBLEU(generatedAnswer, testCase.getExpectedAnswer()));
+                generationMetrics.setRougeScore(calculateROUGE(generatedAnswer, testCase.getExpectedAnswer()));
+                log.debug("LLM裁判打分: relevancy={}, correctness={}, faithfulness={}", scores[0], scores[1], scores[2]);
+            } else {
+                generationMetrics = evaluateGeneration(generatedAnswer, testCase.getExpectedAnswer(),
+                        retrievalResults, generationTime);
+            }
+        } else {
+            generationMetrics = evaluateGeneration(generatedAnswer, testCase.getExpectedAnswer(),
+                    retrievalResults, generationTime);
+        }
         metrics.setGeneration(generationMetrics);
 
         // 步骤3: 整体评测
