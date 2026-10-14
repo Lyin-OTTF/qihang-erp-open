@@ -5,7 +5,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -130,6 +134,10 @@ public class MetricsCollector {
         private final AtomicLong minDurationMs = new AtomicLong(Long.MAX_VALUE);
         private final AtomicLong maxDurationMs = new AtomicLong(0);
 
+        // 分位计算：有界滑动窗口保存最近 N 次耗时（内存友好，超过则丢弃最旧的）
+        private static final int PERCENTILE_WINDOW_SIZE = 1000;
+        private final ConcurrentLinkedDeque<Long> durationWindow = new ConcurrentLinkedDeque<>();
+
         // 错误类型统计
         private final ConcurrentHashMap<String, LongAdder> errorTypeCount = new ConcurrentHashMap<>();
 
@@ -150,6 +158,7 @@ public class MetricsCollector {
             successCalls.increment();
             totalDurationMs.add(durationMs);
             updateMinMax(durationMs);
+            addToWindow(durationMs);
             lastCallTime = LocalDateTime.now();
         }
 
@@ -161,11 +170,22 @@ public class MetricsCollector {
             failureCalls.increment();
             totalDurationMs.add(durationMs);
             updateMinMax(durationMs);
+            addToWindow(durationMs);
 
             // 统计错误类型
             errorTypeCount.computeIfAbsent(errorType, k -> new LongAdder()).increment();
 
             lastCallTime = LocalDateTime.now();
+        }
+
+        /**
+         * 把耗时加入滑动窗口（超过窗口大小时丢弃最旧的）
+         */
+        private void addToWindow(long durationMs) {
+            durationWindow.addLast(durationMs);
+            while (durationWindow.size() > PERCENTILE_WINDOW_SIZE) {
+                durationWindow.pollFirst();
+            }
         }
 
         /**
@@ -207,6 +227,44 @@ public class MetricsCollector {
          */
         public long getMaxDurationMs() {
             return maxDurationMs.get();
+        }
+
+        /**
+         * 计算 P50 分位（中位数）
+         */
+        public double getP50() {
+            return calculatePercentile(50);
+        }
+
+        /**
+         * 计算 P95 分位
+         */
+        public double getP95() {
+            return calculatePercentile(95);
+        }
+
+        /**
+         * 计算 P99 分位
+         */
+        public double getP99() {
+            return calculatePercentile(99);
+        }
+
+        /**
+         * 通用分位计算（基于滑动窗口内的耗时数据）
+         *
+         * @param percentile 分位数（0-100）
+         * @return 分位值，无数据时返回0
+         */
+        private double calculatePercentile(int percentile) {
+            if (durationWindow.isEmpty()) {
+                return 0.0;
+            }
+            List<Long> sorted = new ArrayList<>(durationWindow);
+            Collections.sort(sorted);
+            int index = (int) Math.ceil(percentile / 100.0 * sorted.size()) - 1;
+            index = Math.max(0, Math.min(index, sorted.size() - 1));
+            return sorted.get(index);
         }
 
         /**
@@ -261,6 +319,10 @@ public class MetricsCollector {
         // 响应时间统计
         private final LongAdder totalDurationMs = new LongAdder();
 
+        // 分位计算：有界滑动窗口
+        private static final int PERCENTILE_WINDOW_SIZE = 1000;
+        private final ConcurrentLinkedDeque<Long> durationWindow = new ConcurrentLinkedDeque<>();
+
         // 错误类型统计
         private final ConcurrentHashMap<String, LongAdder> errorTypeCount = new ConcurrentHashMap<>();
 
@@ -271,14 +333,36 @@ public class MetricsCollector {
             totalCalls.increment();
             successCalls.increment();
             totalDurationMs.add(durationMs);
+            addToWindow(durationMs);
         }
 
         public void recordFailure(long durationMs, String errorType) {
             totalCalls.increment();
             failureCalls.increment();
             totalDurationMs.add(durationMs);
+            addToWindow(durationMs);
 
             errorTypeCount.computeIfAbsent(errorType, k -> new LongAdder()).increment();
+        }
+
+        private void addToWindow(long durationMs) {
+            durationWindow.addLast(durationMs);
+            while (durationWindow.size() > PERCENTILE_WINDOW_SIZE) {
+                durationWindow.pollFirst();
+            }
+        }
+
+        public double getP50() { return calculatePercentile(50); }
+        public double getP95() { return calculatePercentile(95); }
+        public double getP99() { return calculatePercentile(99); }
+
+        private double calculatePercentile(int percentile) {
+            if (durationWindow.isEmpty()) return 0.0;
+            List<Long> sorted = new ArrayList<>(durationWindow);
+            Collections.sort(sorted);
+            int index = (int) Math.ceil(percentile / 100.0 * sorted.size()) - 1;
+            index = Math.max(0, Math.min(index, sorted.size() - 1));
+            return sorted.get(index);
         }
 
         public void reset() {
@@ -287,6 +371,7 @@ public class MetricsCollector {
             failureCalls.reset();
             totalDurationMs.reset();
             errorTypeCount.clear();
+            durationWindow.clear();
         }
 
         public double getSuccessRate() {

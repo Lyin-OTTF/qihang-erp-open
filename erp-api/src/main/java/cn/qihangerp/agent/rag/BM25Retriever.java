@@ -72,6 +72,22 @@ public class BM25Retriever {
             termFreq.put(term, termFreq.getOrDefault(term, 0) + 1);
         }
 
+        // 若该 chunkId 已存在，先从 documentFrequency 减去旧词频贡献，避免重复计数
+        Map<String, Integer> oldTermFreq = invertedIndex.get(chunkId);
+        if (oldTermFreq != null) {
+            for (String term : oldTermFreq.keySet()) {
+                documentFrequency.merge(term, -1, Integer::sum);
+                // df 减到 0 时清理，避免 calculateIDF 里 df=0 但 map 里还有残留
+                if (documentFrequency.get(term) != null && documentFrequency.get(term) <= 0) {
+                    documentFrequency.remove(term);
+                }
+            }
+            log.debug("重复索引同一chunk，先扣除旧df: chunkId={}, 旧词数={}", chunkId, oldTermFreq.size());
+        } else {
+            // 仅新文档才增加 totalDocs
+            totalDocs++;
+        }
+
         // 更新倒排索引
         invertedIndex.put(chunkId, termFreq);
         chunkContent.put(chunkId, content);
@@ -79,19 +95,18 @@ public class BM25Retriever {
             chunkMerchant.put(chunkId, merchantId);
         }
 
-        // 更新文档频率
+        // 更新文档频率（加新贡献）
         for (String term : termFreq.keySet()) {
             documentFrequency.merge(term, 1, Integer::sum);
         }
 
-        // 更新统计信息
-        totalDocs++;
+        // 重算平均文档长度（invertedIndex.size() 才是真实文档数，totalDocs 可能因重复索引偏大，此处用真实值）
         avgDocLength = invertedIndex.values().stream()
                 .mapToInt(tf -> tf.values().stream().mapToInt(Integer::intValue).sum())
                 .average()
                 .orElse(0.0);
 
-        log.debug("文档已索引: chunkId={}, merchantId={}, terms={}", chunkId, merchantId, terms.size());
+        log.debug("文档已索引: chunkId={}, merchantId={}, terms={}, 真实文档数={}", chunkId, merchantId, terms.size(), invertedIndex.size());
     }
 
     /**
@@ -272,7 +287,7 @@ public class BM25Retriever {
      */
     public Map<String, Object> getStatistics() {
         Map<String, Object> stats = new HashMap<>();
-        stats.put("totalDocs", totalDocs);
+        stats.put("totalDocs", invertedIndex.size());  // 真实文档数（去重后）
         stats.put("avgDocLength", avgDocLength);
         stats.put("vocabularySize", documentFrequency.size());
         stats.put("indexedChunks", invertedIndex.size());

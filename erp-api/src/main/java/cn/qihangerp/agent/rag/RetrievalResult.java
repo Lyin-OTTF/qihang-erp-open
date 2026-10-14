@@ -72,6 +72,11 @@ public class RetrievalResult {
     private Double rrfScore;
 
     /**
+     * Rerank重排序分数（如果启用了Rerank）
+     */
+    private Double rerankScore;
+
+    /**
      * 创建向量检索结果
      */
     public static RetrievalResult createVectorResult(String chunkId, String content,
