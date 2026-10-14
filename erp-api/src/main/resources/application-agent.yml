@@ -14,7 +14,7 @@ spring:
       chat:
         enabled: true
         base-url: https://api.deepseek.com
-        api-key: ${DEEPSEEK_API_KEY:sk-your-api-key-here}
+        api-key: ${DEEPSEEK_API_KEY:}
         options:
           model: deepseek-chat
           temperature: 0.7
@@ -23,12 +23,12 @@ spring:
     # OpenAI格式API配置（兼容DeepSeek/阿里云百炼/Ollama等）
     openai:
       # 公共凭证层（Embedding自动配置从此读取，chat由DeepSeek starter独立处理）
-      api-key: "sk-ws-H.PPIIPEX.qYvR.MEUCIClNebyu1AbwWikIs_cT3xOlMYvHpr7mIgfWIuN1lq6zAiEAmUWouiaqpBsAYz_h6nSG6RVHPOnKR5HOMbob3KCFlxw"
-      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      api-key: ${DASHSCOPE_API_KEY:}
+      base-url: ${OPENAI_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
       chat:
         enabled: true
         base-url: ${OPENAI_BASE_URL:https://api.deepseek.com}
-        api-key: ${OPENAI_API_KEY:sk-your-api-key-here}
+        api-key: ${OPENAI_API_KEY:}
         options:
           model: ${OPENAI_MODEL:deepseek-chat}
           temperature: 0.7
@@ -37,8 +37,8 @@ spring:
       # Embedding模型配置（向量化，阿里云百炼）
       embedding:
         enabled: true
-        base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
-        api-key: "sk-ws-H.PPIIPEX.qYvR.MEUCIClNebyu1AbwWikIs_cT3xOlMYvHpr7mIgfWIuN1lq6zAiEAmUWouiaqpBsAYz_h6nSG6RVHPOnKR5HOMbob3KCFlxw"
+        base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+        api-key: ${DASHSCOPE_API_KEY:}
         options:
           model: text-embedding-v3
 
@@ -46,9 +46,9 @@ spring:
     vectorstore:
       pgvector:
         enabled: false
-        url: jdbc:postgresql://localhost:5432/erp_vector
-        username: postgres
-        password: "1234"
+        url: ${PGVECTOR_URL:jdbc:postgresql://localhost:5432/erp_vector}
+        username: ${PGVECTOR_USERNAME:postgres}
+        password: ${PGVECTOR_PASSWORD:}
         driver-class-name: org.postgresql.Driver
         index-type: HNSW
         distance-type: COSINE_DISTANCE
@@ -88,16 +88,16 @@ spring:
     # MySQL主数据库（业务数据）
     primary:
       driver-class-name: com.mysql.cj.jdbc.Driver
-      url: jdbc:mysql://localhost:3306/qihang_erp?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&serverTimezone=GMT%2B8
-      username: root
-      password: root
+      url: ${MYSQL_URL:jdbc:mysql://localhost:3306/qihang_erp?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&serverTimezone=GMT%2B8}
+      username: ${MYSQL_USERNAME:root}
+      password: ${MYSQL_PASSWORD:}
 
     # PostgreSQL向量数据库（RAG知识库）
     pgvector:
       driver-class-name: org.postgresql.Driver
-      url: jdbc:postgresql://localhost:5432/erp_vector
-      username: postgres
-      password: "1234"
+      url: ${PGVECTOR_URL:jdbc:postgresql://localhost:5432/erp_vector}
+      username: ${PGVECTOR_USERNAME:postgres}
+      password: ${PGVECTOR_PASSWORD:}
 
 
 # ============ Agent配置 ============
@@ -112,11 +112,11 @@ agent:
   # false: 禁用，应用不依赖PostgreSQL，检索降级为 MySQL FULLTEXT → BM25
   vector-store:
     enabled: false
-    host: localhost
-    port: 5432
-    database: erp_vector
-    username: postgres
-    password: "1234"
+    host: ${PGVECTOR_HOST:localhost}
+    port: ${PGVECTOR_PORT:5432}
+    database: ${PGVECTOR_DATABASE:erp_vector}
+    username: ${PGVECTOR_USERNAME:postgres}
+    password: ${PGVECTOR_PASSWORD:}
     dimensions: 1024
 
   # RAG配置
