@@ -177,9 +177,9 @@ public class SysUserServiceImpl implements ISysUserService
     @Transactional
     public int insertUser(SysUser user)
     {
-        // 兜底：用户类型默认 "00"（系统用户），修复 Field 'user_type' doesn't have a default value）
+        // 用户类型兜底：有商户归属的默认商户类型(20)，无商户归属的才是平台管理员(00)
         if (user.getUserType() == null || user.getUserType().isEmpty()) {
-            user.setUserType("00");
+            user.setUserType(user.getMerchantId() != null ? "20" : "00");
         }
         // 兜底：部门ID默认值 0（前端不再展示部门选择器，统一使用0）
         if (user.getDeptId() == null) {
@@ -202,9 +202,9 @@ public class SysUserServiceImpl implements ISysUserService
      */
     public boolean registerUser(SysUser user)
     {
-        // 兜底：用户类型默认 "00"（系统用户）
+        // 用户类型兜底：有商户归属的默认商户类型(20)，无商户归属的才是平台管理员(00)
         if (user.getUserType() == null || user.getUserType().isEmpty()) {
-            user.setUserType("00");
+            user.setUserType(user.getMerchantId() != null ? "20" : "00");
         }
         // 兜底：部门ID默认值 0
         if (user.getDeptId() == null) {
