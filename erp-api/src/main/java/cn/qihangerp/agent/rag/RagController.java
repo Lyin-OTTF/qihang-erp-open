@@ -29,8 +29,8 @@ public class RagController {
     private final MysqlFullTextRetriever mysqlFullTextRetriever;
     private final cn.qihangerp.agent.tenant.TenantAuthorizer tenantAuthorizer;
 
-    /** 平台管理员 user_type = "0" */
-    private static final String ADMIN_USER_TYPE = "0";
+    /** 平台管理员 user_type = "00"（与 TenantAuthorizer、SysUserServiceImpl、前端保持一致） */
+    private static final String ADMIN_USER_TYPE = "00";
 
     /** 仅平台管理员可调用（索引写入/清空属于全局操作） */
     private void requireAdmin() {

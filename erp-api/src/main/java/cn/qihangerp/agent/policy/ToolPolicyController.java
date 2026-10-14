@@ -33,8 +33,8 @@ public class ToolPolicyController {
 
     private final PolicyRegistry policyRegistry;
 
-    /** 平台管理员 user_type = "0"（EnumUserType.SUPPER） */
-    private static final String ADMIN_USER_TYPE = "0";
+    /** 平台管理员 user_type = "00"（与 TenantAuthorizer、SysUserServiceImpl、前端保持一致） */
+    private static final String ADMIN_USER_TYPE = "00";
 
     /**
      * 列出所有已注册工具的当前策略（含注解默认值和DB覆盖值）。

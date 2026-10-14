@@ -82,6 +82,15 @@ public class SysUserController extends BaseController
         {
             return error("新增用户'" + user.getUserName() + "'失败，邮箱账号已存在");
         }
+        // 租户绑定：商户管理员创建的用户强制继承当前商户，不允许创建平台管理员
+        cn.qihangerp.security.LoginUser loginUser = SecurityUtils.getLoginUser();
+        if (loginUser != null && loginUser.getMerchantId() != null) {
+            user.setMerchantId(loginUser.getMerchantId());
+            // 商户用户不允许创建 user_type='00' 的平台管理员，强制设为商户类型
+            if (user.getUserType() == null || "00".equals(user.getUserType())) {
+                user.setUserType("20");
+            }
+        }
         user.setCreateBy(getUsername());
         user.setPassword(SecurityUtils.encryptPassword(user.getPassword()));
         return toAjax(userService.insertUser(user));
