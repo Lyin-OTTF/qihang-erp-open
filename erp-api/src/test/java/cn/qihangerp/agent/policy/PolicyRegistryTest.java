@@ -74,7 +74,7 @@ class PolicyRegistryTest {
 
     private PolicyRegistry createRegistryWithTestBean() {
         ApplicationContext ctx = createStubContext(Map.of("testToolBean", new TestToolBean()));
-        PolicyRegistry registry = new PolicyRegistry(ctx);
+        PolicyRegistry registry = new PolicyRegistry(ctx, null);
         registry.init();
         return registry;
     }

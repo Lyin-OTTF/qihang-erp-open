@@ -20,8 +20,21 @@ public class SysUser
     /** 部门ID */
     private Long deptId;
 
+    /** 归属商户(租户)ID，NULL为平台管理员 */
+    private Long merchantId;
+
     /** 用户类型（00系统用户 10云仓库 20商户 30供应商 40店铺） */
     private String userType;
+
+    public Long getMerchantId()
+    {
+        return merchantId;
+    }
+
+    public void setMerchantId(Long merchantId)
+    {
+        this.merchantId = merchantId;
+    }
 
     public String getUserType()
     {

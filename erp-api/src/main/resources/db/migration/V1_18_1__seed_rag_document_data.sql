@@ -2,7 +2,8 @@
 -- 18条ERP售后SOP文档chunk，覆盖6领域×3条
 -- merchant_id=1 为全局共享知识
 
-INSERT INTO `rag_document` (`chunk_id`, `doc_id`, `title`, `content`, `domain`, `merchant_id`) VALUES
+-- INSERT IGNORE：以 uk_chunk_id 去重，干净库正常写入，已手工灌入数据的库幂等跳过，避免重复键失败
+INSERT IGNORE INTO `rag_document` (`chunk_id`, `doc_id`, `title`, `content`, `domain`, `merchant_id`) VALUES
 -- ===== 订单领域 =====
 ('sop_order_001', 'sop_order', '已付款订单取消流程',
  '已付款订单取消流程：客户申请取消已付款订单时，客服需先确认订单是否已发货。未发货订单可直接在订单详情页点击取消订单，系统自动触发退款流程，退款原路返回支付账户，通常1-3个工作日到账。已发货订单不可直接取消，需引导客户签收后申请退货退款。注意：拼团订单在拼团成功前不可取消，超时未成团系统自动取消并退款。',

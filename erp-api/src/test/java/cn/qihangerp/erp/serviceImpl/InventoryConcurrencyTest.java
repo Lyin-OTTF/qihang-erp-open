@@ -1,4 +1,5 @@
 package cn.qihangerp.erp.serviceImpl;
+import org.junit.jupiter.api.Tag;
 
 import cn.qihangerp.mapper.OGoodsInventoryMapper;
 import cn.qihangerp.mapper.OGoodsInventoryOperationMapper;
@@ -38,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>测试场景：初始库存100，50个线程各扣减3，总需求150 > 库存100。
  * 预期：最多33次成功（33*3=99），最终库存>=0，绝不出现负库存。</p>
  */
+@Tag("it")
 class InventoryConcurrencyTest {
 
     private static final int INITIAL_STOCK = 100;

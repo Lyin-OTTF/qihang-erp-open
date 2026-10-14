@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.cache;
+import org.junit.jupiter.api.Tag;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterAll;
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author 回溯开发-Redis缓存层
  * @since 2026-10-13
  */
+@Tag("it")
 class GoodsCacheServiceTest {
 
     private static StringRedisTemplate redisTemplate;

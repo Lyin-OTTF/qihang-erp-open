@@ -9,19 +9,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * 幂等性守护。
  *
- * <p>在 Tool 执行前检查幂等键：如果相同参数的调用已经在执行或已完成，
- * 直接返回缓存结果或拒绝重复调用。</p>
- *
- * <p>状态流转：
- * <pre>
- *   checkAndMark() → "processing"（标记执行中）
- *   执行完成 → complete(resultDigest)（标记完成，缓存结果摘要）
- *   执行失败 → fail()（清除标记，允许重试）
- * </pre>
- * </p>
- *
- * @author 回溯开发-搁置项攻关
- * @since 2026-10-12
+ * <p>第四期加固：checkAndMark 改用 SET NX 原子操作（setIfAbsent），
+ * 消除 GET-then-SET 竞态；Redis 不可用时 fail-open（放行但记录警告），
+ * 避免 Redis 故障阻塞全部写操作。</p>
  */
 @Slf4j
 @Component
@@ -39,49 +29,57 @@ public class IdempotencyGuard {
     }
 
     /**
-     * 检查并标记幂等键。
+     * 原子检查并标记幂等键（SET NX）。
      *
-     * @param merchantId 商户ID
-     * @param userId 用户ID
-     * @param toolName 工具名称
-     * @param args 方法参数
-     * @return IdempotencyResult：isDuplicate=true 表示重复调用，cachedResult 含上次结果摘要
+     * @return IdempotencyResult：isDuplicate=true 表示重复调用
      */
     public IdempotencyResult checkAndMark(Long merchantId, Long userId, String toolName, Object... args) {
         String key = keyGenerator.generateKey(merchantId, userId, toolName, args);
-        String existing = redisTemplate.opsForValue().get(key);
-
-        if (existing != null) {
-            if (existing.startsWith(STATUS_COMPLETED)) {
-                String cachedResult = existing.substring(STATUS_COMPLETED.length());
-                log.info("幂等命中（已完成）: tool={}, key={}", toolName, key);
-                return IdempotencyResult.duplicate(cachedResult);
-            }
-            if (STATUS_PROCESSING.equals(existing)) {
+        try {
+            // 原子 SET NX：只有 key 不存在时才设置成功
+            Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
+                    key, STATUS_PROCESSING, keyGenerator.getTtlSeconds(), TimeUnit.SECONDS);
+            if (Boolean.FALSE.equals(acquired)) {
+                // key 已存在，读取状态判断是 processing 还是 completed
+                String existing = redisTemplate.opsForValue().get(key);
+                if (existing != null && existing.startsWith(STATUS_COMPLETED)) {
+                    String cachedResult = existing.substring(STATUS_COMPLETED.length());
+                    log.info("幂等命中（已完成）: tool={}, key={}", toolName, key);
+                    return IdempotencyResult.duplicate(cachedResult);
+                }
                 log.info("幂等命中（执行中）: tool={}, key={}", toolName, key);
                 return IdempotencyResult.processing();
             }
+            log.debug("幂等标记（执行中，原子SET NX）: tool={}, key={}", toolName, key);
+            return IdempotencyResult.proceed(key);
+        } catch (Exception e) {
+            // Redis 不可用时 fail-open：放行写操作，避免 Redis 故障导致业务全阻
+            log.warn("幂等检查Redis异常，fail-open放行: tool={}, error={}", toolName, e.getMessage());
+            return IdempotencyResult.proceed(key);
         }
-
-        // 标记为执行中
-        redisTemplate.opsForValue().set(key, STATUS_PROCESSING, keyGenerator.getTtlSeconds(), TimeUnit.SECONDS);
-        log.debug("幂等标记（执行中）: tool={}, key={}", toolName, key);
-        return IdempotencyResult.proceed(key);
     }
 
     /**
      * 标记执行完成，缓存结果摘要
      */
     public void complete(String idempotencyKey, String resultDigest) {
-        redisTemplate.opsForValue().set(idempotencyKey, STATUS_COMPLETED + resultDigest,
-                keyGenerator.getTtlSeconds(), TimeUnit.SECONDS);
+        try {
+            redisTemplate.opsForValue().set(idempotencyKey, STATUS_COMPLETED + resultDigest,
+                    keyGenerator.getTtlSeconds(), TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("标记幂等完成失败（不影响业务）: {}", e.getMessage());
+        }
     }
 
     /**
      * 标记执行失败，清除幂等标记（允许重试）
      */
     public void fail(String idempotencyKey) {
-        redisTemplate.delete(idempotencyKey);
+        try {
+            redisTemplate.delete(idempotencyKey);
+        } catch (Exception e) {
+            log.warn("清除幂等标记失败（不影响业务）: {}", e.getMessage());
+        }
     }
 
     /**

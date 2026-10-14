@@ -94,6 +94,7 @@ public class ToolGateway {
         DistributedLockService.LockHandle distLockHandle = null;
         String idempotencyKey = null;
         TraceEntry traceEntry = null;
+        boolean inMemoryLockAcquired = false;
 
         try {
             // 步骤1: 查找Tool方法
@@ -125,11 +126,11 @@ public class ToolGateway {
             // 步骤3: 权限检查
             validatePolicy(policy, context);
 
-            // 步骤4: 租户隔离检查
+            // 步骤4: 租户隔离检查（fail-closed）：需要租户隔离的工具，缺少租户ID一律拒绝，不得放行查全租户
             if (policy.requiresTenantIsolation() && context.getMerchantId() == null) {
-                // 回溯开发-阶段1调整：缺失租户ID时告警放行，避免破坏现有无租户头的调用链路；
-                // 工具层会在 TenantContext 有值时自行加 merchantId 过滤，无值时保持原行为（查全部）。
-                log.warn("Tool[{}]未携带租户ID，跳过强制租户隔离（向后兼容），工具层将按无租户处理", toolName);
+                String errorMsg = "缺少租户ID，拒绝执行（fail-closed）: " + toolName;
+                log.error(errorMsg);
+                throw new ToolExecutionException(errorMsg);
             }
 
             // 步骤4.5: 幂等性检查（仅对写操作工具生效，防止AI重复调用导致重复写）
@@ -165,15 +166,16 @@ public class ToolGateway {
                         log.warn(errorMsg);
                         throw new ToolExecutionException(errorMsg);
                     }
+                    inMemoryLockAcquired = true;
                 }
             }
 
             // 步骤6: 人工确认检查（ESCALATE级别）
             if (policy.level() == AutonomyLevel.ESCALATE) {
                 if (!context.isApproved()) {
-                    // 检查是否已有通过的审批（同一traceId+toolName）
+                    // 检查是否已有通过的审批（同一traceId+toolName+参数摘要，且未过期）
                     boolean alreadyApproved = approvalService != null
-                            && approvalService.isApproved(context.getTraceId(), toolName);
+                            && approvalService.isApproved(context.getTraceId(), toolName, args);
                     if (alreadyApproved) {
                         log.info("Tool[{}]已有审批通过记录，直接执行", toolName);
                         ApprovalRequest approved = approvalService.getApprovedApproval(context.getTraceId(), toolName);
@@ -195,6 +197,29 @@ public class ToolGateway {
                                 toolName, context.getTraceId(), approvalId);
                     }
                 }
+            }
+
+            // 步骤6.5: DRAFT 模式 — 创建草稿审批记录，不实际执行，返回草稿信息（AI流继续）
+            if (policy.level() == AutonomyLevel.DRAFT) {
+                Long draftId = null;
+                if (approvalService != null) {
+                    draftId = approvalService.createApproval(
+                            context.getTraceId(), toolName, "[草稿]" + policy.description(),
+                            context.getMerchantId(), context.getUserId(), args);
+                }
+                String argsStr = args != null && args.length > 0 ? java.util.Arrays.toString(args) : "无";
+                String draftMsg = String.format(
+                        "【草稿已创建】操作已保存为草稿，审批ID: %d，等待人工审核通过后执行。%n工具: %s%n参数: %s",
+                        draftId != null ? draftId : -1L, toolName, argsStr);
+                log.info("Tool[{}] DRAFT模式，创建草稿审批 id={}", toolName, draftId);
+                if (policy.requiresAudit()) {
+                    recordAuditLog(toolName, policy, context, args, draftMsg, true, null, startTime);
+                }
+                if (traceEntry != null && traceService != null) {
+                    try { traceService.recordSuccess(traceEntry, draftMsg, System.currentTimeMillis() - startTime); }
+                    catch (Exception ex) { log.warn("Trace记录失败: {}", ex.getMessage()); }
+                }
+                return draftMsg;
             }
 
             // 步骤7: 执行Tool方法
@@ -316,8 +341,10 @@ public class ToolGateway {
                     log.warn("释放分布式锁失败: {}", e.getMessage());
                 }
             }
-            // 释放内存锁（降级路径）
-            executionLocks.remove(toolName);
+            // 释放内存锁（降级路径）：仅当本线程实际获取了锁才释放，防止误删其他线程持有的锁
+            if (inMemoryLockAcquired) {
+                executionLocks.remove(toolName);
+            }
         }
     }
 
@@ -442,7 +469,7 @@ public class ToolGateway {
             return policy;
         }
         // 3. 最后用默认策略
-        log.warn("Tool方法[{}]缺少@ToolPolicy注解，使用默认OBSERVE策略", toolName);
+        log.warn("Tool方法[{}]缺少@ToolPolicy注解，使用默认ESCALATE策略（fail-closed，需人工审批）", toolName);
         return createDefaultPolicy();
     }
 
@@ -484,12 +511,12 @@ public class ToolGateway {
 
             @Override
             public AutonomyLevel level() {
-                return AutonomyLevel.OBSERVE;
+                return AutonomyLevel.ESCALATE;
             }
 
             @Override
             public String category() {
-                return "未分类";
+                return "未分类(默认fail-closed)";
             }
 
             @Override

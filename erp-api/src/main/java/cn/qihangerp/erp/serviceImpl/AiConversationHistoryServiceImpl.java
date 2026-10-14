@@ -25,6 +25,24 @@ public class AiConversationHistoryServiceImpl
     }
 
     @Override
+    public List<AiConversationHistory> getConversationForUser(String sessionId, Long userId) {
+        // 归属校验：若该会话存在且属于其他用户，直接拒绝（堵水平越权）
+        Long owner = lambdaQuery()
+                .eq(AiConversationHistory::getSessionId, sessionId)
+                .select(AiConversationHistory::getUserId)
+                .last("LIMIT 1")
+                .list()
+                .stream()
+                .map(AiConversationHistory::getUserId)
+                .findFirst()
+                .orElse(null);
+        if (owner != null && !owner.equals(userId)) {
+            throw new org.springframework.security.access.AccessDeniedException("无权访问他人会话");
+        }
+        return getConversation(sessionId);
+    }
+
+    @Override
     public void saveMessage(String sessionId, Long userId, String role, String content) {
         AiConversationHistory msg = new AiConversationHistory();
         msg.setSessionId(sessionId);

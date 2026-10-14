@@ -1,5 +1,7 @@
 package cn.qihangerp.agent.workflow;
 
+import cn.qihangerp.agent.audit.ActionLedgerRequest;
+import cn.qihangerp.agent.audit.ActionLedgerService;
 import cn.qihangerp.agent.dag.DAGNode;
 import cn.qihangerp.agent.dag.DAGScheduler;
 import cn.qihangerp.agent.dag.ExecutionContext;
@@ -57,15 +59,17 @@ public class AgentWorkflowService {
     private final CheckpointManager checkpointManager;
     private final ObjectMapper objectMapper;
     private final DAGScheduler dagScheduler;
+    private final ActionLedgerService actionLedgerService;
 
     @Autowired
     public AgentWorkflowService(ShopOrderMapper shopOrderMapper,
                                 ShopRefundMapper shopRefundMapper,
                                 TransitionValidator transitionValidator,
                                 CheckpointManager checkpointManager,
-                                ObjectMapper objectMapper) {
+                                ObjectMapper objectMapper,
+                                ActionLedgerService actionLedgerService) {
         this(shopOrderMapper, shopRefundMapper, transitionValidator,
-                checkpointManager, objectMapper, new DAGScheduler(4));
+                checkpointManager, objectMapper, new DAGScheduler(4), actionLedgerService);
     }
 
     /** 测试用构造函数：可指定DAGScheduler（如parallelism=1串行执行） */
@@ -74,13 +78,15 @@ public class AgentWorkflowService {
                                 TransitionValidator transitionValidator,
                                 CheckpointManager checkpointManager,
                                 ObjectMapper objectMapper,
-                                DAGScheduler dagScheduler) {
+                                DAGScheduler dagScheduler,
+                                ActionLedgerService actionLedgerService) {
         this.shopOrderMapper = shopOrderMapper;
         this.shopRefundMapper = shopRefundMapper;
         this.transitionValidator = transitionValidator;
         this.checkpointManager = checkpointManager;
         this.objectMapper = objectMapper;
         this.dagScheduler = dagScheduler;
+        this.actionLedgerService = actionLedgerService;
     }
 
     /**
@@ -155,15 +161,20 @@ public class AgentWorkflowService {
     private List<DAGNode> buildAfterSalesNodes() {
         List<DAGNode> nodes = new ArrayList<>();
 
-        // 1. 查询订单详情（无依赖）
+        // 1. 查询订单详情（无依赖，租户过滤）
         nodes.add(DAGNode.builder("fetch_order")
                 .name("查询订单详情")
                 .executor(ctx -> {
                     Long orderId = ctx.get("orderId", Long.class);
-                    ShopOrder order = shopOrderMapper.selectOne(
-                            new LambdaQueryWrapper<ShopOrder>().eq(ShopOrder::getId, orderId));
+                    Long merchantId = ctx.get("merchantId", Long.class);
+                    LambdaQueryWrapper<ShopOrder> qw = new LambdaQueryWrapper<ShopOrder>()
+                            .eq(ShopOrder::getId, orderId);
+                    if (merchantId != null) {
+                        qw.eq(ShopOrder::getMerchantId, merchantId);
+                    }
+                    ShopOrder order = shopOrderMapper.selectOne(qw);
                     if (order == null) {
-                        throw new RuntimeException("订单不存在: " + orderId);
+                        throw new RuntimeException("订单不存在或不属于当前租户: orderId=" + orderId);
                     }
                     ctx.put("currentOrderStatus", order.getOrderStatus());
                     try {
@@ -174,15 +185,20 @@ public class AgentWorkflowService {
                 })
                 .build());
 
-        // 2. 查询售后单详情（无依赖）
+        // 2. 查询售后单详情（无依赖，租户过滤）
         nodes.add(DAGNode.builder("fetch_refund")
                 .name("查询售后单详情")
                 .executor(ctx -> {
                     Long refundId = ctx.get("refundId", Long.class);
-                    ShopRefund refund = shopRefundMapper.selectOne(
-                            new LambdaQueryWrapper<ShopRefund>().eq(ShopRefund::getId, refundId));
+                    Long merchantId = ctx.get("merchantId", Long.class);
+                    LambdaQueryWrapper<ShopRefund> qw = new LambdaQueryWrapper<ShopRefund>()
+                            .eq(ShopRefund::getId, refundId);
+                    if (merchantId != null) {
+                        qw.eq(ShopRefund::getMerchantId, merchantId);
+                    }
+                    ShopRefund refund = shopRefundMapper.selectOne(qw);
                     if (refund == null) {
-                        throw new RuntimeException("售后单不存在: " + refundId);
+                        throw new RuntimeException("售后单不存在或不属于当前租户: refundId=" + refundId);
                     }
                     ctx.put("currentRefundStatus", refund.getStatus());
                     ctx.put("originalRefundStatus", refund.getStatus());
@@ -228,28 +244,39 @@ public class AgentWorkflowService {
                 })
                 .build());
 
-        // 5. 执行退款处理（依赖4，写操作带补偿）
+        // 5. 执行退款处理（依赖4，写操作带补偿，状态机校验+租户过滤）
         nodes.add(DAGNode.builder("process_refund")
                 .name("执行退款处理")
                 .dependsOn("validate_transition")
                 .executor(ctx -> {
                     Long refundId = ctx.get("refundId", Long.class);
+                    Long merchantId = ctx.get("merchantId", Long.class);
                     Integer originalStatus = ctx.get("originalRefundStatus", Integer.class);
-                    // 更新售后状态为3(退款中)
+                    // 状态机校验：当前售后状态 → 3(退款中)
+                    transitionValidator.validateRefundTransition(
+                            originalStatus, 3, String.valueOf(refundId));
+                    // 租户过滤更新
                     LambdaUpdateWrapper<ShopRefund> wrapper = new LambdaUpdateWrapper<>();
-                    wrapper.eq(ShopRefund::getId, refundId)
-                            .set(ShopRefund::getStatus, 3);
+                    wrapper.eq(ShopRefund::getId, refundId);
+                    if (merchantId != null) {
+                        wrapper.eq(ShopRefund::getMerchantId, merchantId);
+                    }
+                    wrapper.set(ShopRefund::getStatus, 3);
                     shopRefundMapper.update(null, wrapper);
                     ctx.put("refundUpdated", true);
                     return "refund_status_updated_to_3";
                 })
                 .compensator(ctx -> {
                     Long refundId = ctx.get("refundId", Long.class);
+                    Long merchantId = ctx.get("merchantId", Long.class);
                     Integer originalStatus = ctx.get("originalRefundStatus", Integer.class);
                     if (originalStatus != null && Boolean.TRUE.equals(ctx.get("refundUpdated", Boolean.class))) {
                         LambdaUpdateWrapper<ShopRefund> wrapper = new LambdaUpdateWrapper<>();
-                        wrapper.eq(ShopRefund::getId, refundId)
-                                .set(ShopRefund::getStatus, originalStatus);
+                        wrapper.eq(ShopRefund::getId, refundId);
+                        if (merchantId != null) {
+                            wrapper.eq(ShopRefund::getMerchantId, merchantId);
+                        }
+                        wrapper.set(ShopRefund::getStatus, originalStatus);
                         shopRefundMapper.update(null, wrapper);
                         log.info("补偿回滚: 退款状态恢复为{}", originalStatus);
                     }
@@ -257,32 +284,44 @@ public class AgentWorkflowService {
                 })
                 .build());
 
-        // 6. 更新订单卖家备注（依赖5，写操作带补偿）
+        // 6. 更新订单卖家备注（依赖5，写操作带补偿，租户过滤）
         nodes.add(DAGNode.builder("update_memo")
                 .name("更新订单卖家备注")
                 .dependsOn("process_refund")
                 .executor(ctx -> {
                     Long orderId = ctx.get("orderId", Long.class);
-                    ShopOrder order = shopOrderMapper.selectOne(
-                            new LambdaQueryWrapper<ShopOrder>().eq(ShopOrder::getId, orderId));
+                    Long merchantId = ctx.get("merchantId", Long.class);
+                    LambdaQueryWrapper<ShopOrder> qw = new LambdaQueryWrapper<ShopOrder>()
+                            .eq(ShopOrder::getId, orderId);
+                    if (merchantId != null) {
+                        qw.eq(ShopOrder::getMerchantId, merchantId);
+                    }
+                    ShopOrder order = shopOrderMapper.selectOne(qw);
                     String originalMemo = order != null ? order.getSellerMemo() : null;
                     ctx.put("originalSellerMemo", originalMemo);
                     String newMemo = (originalMemo == null ? "" : originalMemo)
                             + "[AI售后处理] 已自动处理退款流程";
                     LambdaUpdateWrapper<ShopOrder> wrapper = new LambdaUpdateWrapper<>();
-                    wrapper.eq(ShopOrder::getId, orderId)
-                            .set(ShopOrder::getSellerMemo, newMemo);
+                    wrapper.eq(ShopOrder::getId, orderId);
+                    if (merchantId != null) {
+                        wrapper.eq(ShopOrder::getMerchantId, merchantId);
+                    }
+                    wrapper.set(ShopOrder::getSellerMemo, newMemo);
                     shopOrderMapper.update(null, wrapper);
                     ctx.put("memoUpdated", true);
                     return "memo_updated";
                 })
                 .compensator(ctx -> {
                     Long orderId = ctx.get("orderId", Long.class);
+                    Long merchantId = ctx.get("merchantId", Long.class);
                     String originalMemo = ctx.get("originalSellerMemo", String.class);
                     if (Boolean.TRUE.equals(ctx.get("memoUpdated", Boolean.class))) {
                         LambdaUpdateWrapper<ShopOrder> wrapper = new LambdaUpdateWrapper<>();
-                        wrapper.eq(ShopOrder::getId, orderId)
-                                .set(ShopOrder::getSellerMemo, originalMemo);
+                        wrapper.eq(ShopOrder::getId, orderId);
+                        if (merchantId != null) {
+                            wrapper.eq(ShopOrder::getMerchantId, merchantId);
+                        }
+                        wrapper.set(ShopOrder::getSellerMemo, originalMemo);
                         shopOrderMapper.update(null, wrapper);
                         log.info("补偿回滚: 卖家备注恢复原值");
                     }
@@ -301,15 +340,46 @@ public class AgentWorkflowService {
                 })
                 .build());
 
-        // 8. 审计日志（依赖3，独立分支，不受主分支失败影响）
+        // 8. 审计日志（依赖3，独立分支，真实落 ActionLedger）
         nodes.add(DAGNode.builder("audit_log")
                 .name("记录审计日志")
                 .dependsOn("fetch_inventory")
                 .executor(ctx -> {
                     Long orderId = ctx.get("orderId", Long.class);
                     Long merchantId = ctx.get("merchantId", Long.class);
-                    log.info("审计日志: workflow={}, orderId={}, merchantId={}",
-                            WORKFLOW_AFTER_SALES, orderId, merchantId);
+                    String executionId = ctx.getExecutionId();
+                    try {
+                        if (actionLedgerService != null) {
+                            ActionLedgerRequest ledger = ActionLedgerRequest.builder()
+                                    .traceId(executionId)
+                                    .toolName("workflow." + WORKFLOW_AFTER_SALES)
+                                    .toolScope("工作流审计")
+                                    .autonomyLevel("EXECUTE")
+                                    .merchantId(merchantId)
+                                    .userId(null)
+                                    .sessionId(null)
+                                    .inputParams(new Object[]{orderId, ctx.get("refundId", Long.class)})
+                                    .outputResult("workflow_executed")
+                                    .success(true)
+                                    .errorMessage(null)
+                                    .errorType(null)
+                                    .startTime(java.time.LocalDateTime.now())
+                                    .endTime(java.time.LocalDateTime.now())
+                                    .durationMs(0)
+                                    .isWriteOperation(true)
+                                    .requiresApproval(false)
+                                    .approved(true)
+                                    .ipAddress(null)
+                                    .userAgent("agent-workflow")
+                                    .build();
+                            actionLedgerService.recordAction(ledger);
+                        } else {
+                            log.info("[审计降级] workflow={}, orderId={}, merchantId={}",
+                                    WORKFLOW_AFTER_SALES, orderId, merchantId);
+                        }
+                    } catch (Exception e) {
+                        log.warn("工作流审计落库失败（不影响主流程）: {}", e.getMessage());
+                    }
                     return "audit_recorded";
                 })
                 .build());

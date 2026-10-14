@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.audit;
+import org.junit.jupiter.api.Tag;
 
 import cn.qihangerp.agent.gateway.ToolGateway;
 import cn.qihangerp.agent.gateway.ToolExecutionContext;
@@ -35,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author 回溯开发-阶段1
  * @since 2026-10-12
  */
+@Tag("it")
 class ActionLedgerPersistenceTest {
 
     private static final String TEST_TRACE_ID = "integration-test-" + System.currentTimeMillis();

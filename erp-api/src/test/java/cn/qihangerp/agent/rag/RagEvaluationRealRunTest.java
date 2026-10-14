@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.rag;
+import org.junit.jupiter.api.Tag;
 
 import com.mysql.cj.jdbc.MysqlDataSource;
 import org.apache.ibatis.session.SqlSessionFactory;
@@ -18,8 +19,9 @@ import static org.junit.jupiter.api.Assertions.*;
  * 对agent_rag_evaluation表中100条评测用例真实执行混合检索，
  * 计算Recall@10/Precision/F1/MRR/NDCG等指标并持久化到agent_rag_eval_result表。</p>
  *
- * <p>这不是mock测试——是对真实DB中110篇文档和100条评测用例的真实检索评测。</p>
+ * <p>这不是mock测试——是对真实DB中100篇文档和100条评测用例的真实检索评测。</p>
  */
+@Tag("it")
 class RagEvaluationRealRunTest {
 
     private JdbcTemplate createJdbcTemplate() {
@@ -34,6 +36,9 @@ class RagEvaluationRealRunTest {
     @Test
     void testRealEvaluationRun() {
         JdbcTemplate jdbcTemplate = createJdbcTemplate();
+
+        // 幂等：删除此前测试跑批记录，保证反复运行只保留本次结果（不累积污染）
+        jdbcTemplate.update("DELETE FROM agent_rag_eval_result WHERE remark LIKE '回溯开发-真实跑批-%'");
 
         // 1. 验证前置数据
         Integer docCount = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM rag_document", Integer.class);
@@ -63,7 +68,7 @@ class RagEvaluationRealRunTest {
         MysqlFullTextRetriever mysqlFtRetriever = new MysqlFullTextRetriever(jdbcTemplate);
         HybridRetriever hybridRetriever = new HybridRetriever(bm25Retriever, mysqlFtRetriever);
         CitationGenerator citationGenerator = new CitationGenerator();
-        RagEvaluator ragEvaluator = new RagEvaluator(jdbcTemplate, hybridRetriever, citationGenerator);
+        RagEvaluator ragEvaluator = new RagEvaluator(jdbcTemplate, hybridRetriever, citationGenerator, null);
 
         // 3. 真实跑评测
         System.out.println("\n=== 开始真实评测（TopK=10）===");

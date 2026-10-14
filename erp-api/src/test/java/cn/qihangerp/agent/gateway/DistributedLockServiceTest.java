@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.gateway;
+import org.junit.jupiter.api.Tag;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -23,6 +24,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author 回溯开发-Redisson接入
  * @since 2026-10-13
  */
+@Tag("it")
 class DistributedLockServiceTest {
 
     private static RedissonClient redissonClient;

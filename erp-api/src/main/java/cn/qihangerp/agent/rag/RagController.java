@@ -27,6 +27,22 @@ public class RagController {
     private final RagEvaluator ragEvaluator;
     private final RagEvaluationScheduler ragEvaluationScheduler;
     private final MysqlFullTextRetriever mysqlFullTextRetriever;
+    private final cn.qihangerp.agent.tenant.TenantAuthorizer tenantAuthorizer;
+
+    /** 平台管理员 user_type = "0" */
+    private static final String ADMIN_USER_TYPE = "0";
+
+    /** 仅平台管理员可调用（索引写入/清空属于全局操作） */
+    private void requireAdmin() {
+        cn.qihangerp.security.LoginUser loginUser = cn.qihangerp.security.common.SecurityUtils.getLoginUser();
+        if (loginUser == null || loginUser.getUser() == null) {
+            throw new org.springframework.security.access.AccessDeniedException("未登录");
+        }
+        String userType = loginUser.getUser().getUserType();
+        if (!ADMIN_USER_TYPE.equals(userType)) {
+            throw new org.springframework.security.access.AccessDeniedException("仅平台管理员可操作知识库索引（当前用户类型: " + userType + "）");
+        }
+    }
 
     /**
      * 混合检索（BM25 + Vector + RRF融合）
@@ -42,7 +58,7 @@ public class RagController {
     public Map<String, Object> retrieve(@RequestBody Map<String, Object> request) {
         String query = (String) request.get("query");
         Integer topK = request.get("topK") != null ? (Integer) request.get("topK") : 10;
-        Long merchantId = Long.valueOf(request.get("merchantId").toString());
+        Long merchantId = tenantAuthorizer.requireTenant(toLong(request.get("merchantId")));
 
         long startTime = System.currentTimeMillis();
 
@@ -70,7 +86,7 @@ public class RagController {
     public Map<String, Object> retrieveVectorOnly(@RequestBody Map<String, Object> request) {
         String query = (String) request.get("query");
         Integer topK = request.get("topK") != null ? (Integer) request.get("topK") : 10;
-        Long merchantId = Long.valueOf(request.get("merchantId").toString());
+        Long merchantId = tenantAuthorizer.requireTenant(toLong(request.get("merchantId")));
 
         List<RetrievalResult> results = hybridRetriever.retrieveVectorOnly(query, topK, merchantId);
 
@@ -92,7 +108,7 @@ public class RagController {
     public Map<String, Object> retrieveBM25Only(@RequestBody Map<String, Object> request) {
         String query = (String) request.get("query");
         Integer topK = request.get("topK") != null ? (Integer) request.get("topK") : 10;
-        Long merchantId = Long.valueOf(request.get("merchantId").toString());
+        Long merchantId = tenantAuthorizer.requireTenant(toLong(request.get("merchantId")));
 
         List<RetrievalResult> results = hybridRetriever.retrieveBM25Only(query, topK, merchantId);
 
@@ -116,6 +132,7 @@ public class RagController {
      */
     @PostMapping("/index")
     public Map<String, Object> indexDocument(@RequestBody Map<String, Object> request) {
+        requireAdmin();
         String chunkId = (String) request.get("chunkId");
         String content = (String) request.get("content");
 
@@ -142,6 +159,7 @@ public class RagController {
      */
     @PostMapping("/index/batch")
     public Map<String, Object> indexBatch(@RequestBody Map<String, Object> request) {
+        requireAdmin();
         @SuppressWarnings("unchecked")
         Map<String, String> chunks = (Map<String, String>) request.get("chunks");
 
@@ -162,6 +180,7 @@ public class RagController {
      */
     @DeleteMapping("/index")
     public Map<String, Object> clearIndex() {
+        requireAdmin();
         bm25Retriever.clearIndex();
 
         Map<String, Object> response = new HashMap<>();
@@ -229,7 +248,7 @@ public class RagController {
         String answer = (String) request.get("answer");
         Integer topK = request.get("topK") != null ? (Integer) request.get("topK") : 10;
         Integer maxCitations = request.get("maxCitations") != null ? (Integer) request.get("maxCitations") : 5;
-        Long merchantId = Long.valueOf(request.get("merchantId").toString());
+        Long merchantId = tenantAuthorizer.requireTenant(toLong(request.get("merchantId")));
 
         long startTime = System.currentTimeMillis();
 
@@ -364,7 +383,7 @@ public class RagController {
      */
     @PostMapping("/evaluate")
     public Map<String, Object> runEvaluation(@RequestBody Map<String, Object> request) {
-        Long merchantId = Long.valueOf(request.get("merchantId").toString());
+        Long merchantId = tenantAuthorizer.requireTenant(toLong(request.get("merchantId")));
         Integer topK = request.get("topK") != null ? (Integer) request.get("topK") : 10;
         String remark = request.get("remark") != null ? (String) request.get("remark") : "手动评测";
 
@@ -385,18 +404,25 @@ public class RagController {
      */
     @GetMapping("/evaluate/history")
     public Map<String, Object> getEvaluationHistory(
-            @RequestParam(defaultValue = "1") Long merchantId,
+            @RequestParam(required = false) Long merchantId,
             @RequestParam(defaultValue = "10") Integer limit) {
 
-        List<java.util.Map<String, Object>> history = ragEvaluator.getRecentResults(merchantId, limit);
+        Long effectiveTenant = tenantAuthorizer.requireTenant(merchantId);
+        List<java.util.Map<String, Object>> history = ragEvaluator.getRecentResults(effectiveTenant, limit);
 
         Map<String, Object> response = new HashMap<>();
         response.put("success", true);
-        response.put("merchantId", merchantId);
+        response.put("merchantId", effectiveTenant);
         response.put("count", history.size());
         response.put("history", history);
 
         return response;
+    }
+
+    private static Long toLong(Object o) {
+        if (o == null) return null;
+        if (o instanceof Number n) return n.longValue();
+        return Long.valueOf(o.toString());
     }
 
     /**

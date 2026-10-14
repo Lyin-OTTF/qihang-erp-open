@@ -31,6 +31,11 @@ public class LoginUser implements UserDetails
     private Long deptId;
 
     /**
+     * 归属商户(租户)ID，NULL为平台管理员
+     */
+    private Long merchantId;
+
+    /**
      * 用户唯一标识
      */
     private String token;
@@ -82,6 +87,7 @@ public class LoginUser implements UserDetails
     public LoginUser(SysUser user, Set<String> permissions)
     {
         this.user = user;
+        this.merchantId = user.getMerchantId();
         this.permissions = permissions;
     }
 
@@ -90,6 +96,7 @@ public class LoginUser implements UserDetails
         this.userId = userId;
         this.deptId = deptId;
         this.user = user;
+        this.merchantId = user != null ? user.getMerchantId() : null;
         this.permissions = permissions;
     }
 
@@ -111,6 +118,16 @@ public class LoginUser implements UserDetails
     public void setDeptId(Long deptId)
     {
         this.deptId = deptId;
+    }
+
+    public Long getMerchantId()
+    {
+        return merchantId;
+    }
+
+    public void setMerchantId(Long merchantId)
+    {
+        this.merchantId = merchantId;
     }
 
     public String getToken()

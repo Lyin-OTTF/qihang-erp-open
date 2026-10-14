@@ -2,7 +2,7 @@
 -- 在V1_16_1的24条基础上补充76条，达到100条
 -- 覆盖 order/refund/inventory/logistics/purchase/goods/member 七个领域
 
-INSERT INTO `agent_rag_evaluation` (`merchant_id`, `question`, `expected_answer`, `relevant_chunks`, `domain`, `difficulty`) VALUES
+INSERT IGNORE INTO `agent_rag_evaluation` (`merchant_id`, `question`, `expected_answer`, `relevant_chunks`, `domain`, `difficulty`) VALUES
 -- ===== 订单领域补充 (12条) =====
 (1, '客户下单后未付款，订单多久会自动关闭？', '待付款订单通常15分钟后自动关闭，具体时间以平台规则为准；关闭后库存释放，客户如需购买需重新下单。', '["order_status_001","order_pay_001"]', 'order', 'easy'),
 (1, '拼团订单怎么取消？', '拼团订单在拼团成功前不可主动取消，超时未成团系统自动取消并全额退款；拼团成功后按普通订单取消流程处理。', '["order_group_001"]', 'order', 'easy'),

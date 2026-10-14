@@ -30,12 +30,14 @@ public class KnowledgeLoader {
     public void loadKnowledge() {
         try {
             List<Map<String, Object>> rows = jdbcTemplate.queryForList(
-                    "SELECT chunk_id, content FROM rag_document ORDER BY id");
+                    "SELECT chunk_id, content, merchant_id FROM rag_document ORDER BY id");
             for (Map<String, Object> row : rows) {
                 String chunkId = (String) row.get("chunk_id");
                 String content = (String) row.get("content");
+                Object merchantObj = row.get("merchant_id");
+                Long merchantId = merchantObj != null ? ((Number) merchantObj).longValue() : null;
                 if (chunkId != null && content != null) {
-                    bm25Retriever.indexDocument(chunkId, content);
+                    bm25Retriever.indexDocument(chunkId, content, merchantId);
                 }
             }
             log.info("知识库加载完成: 共 {} 个chunk 已索引到 BM25", rows.size());

@@ -22,9 +22,12 @@ import java.util.Map;
 public class ApprovalController {
 
     private final ApprovalService approvalService;
+    private final cn.qihangerp.agent.tenant.TenantAuthorizer tenantAuthorizer;
 
-    public ApprovalController(ApprovalService approvalService) {
+    public ApprovalController(ApprovalService approvalService,
+                              cn.qihangerp.agent.tenant.TenantAuthorizer tenantAuthorizer) {
         this.approvalService = approvalService;
+        this.tenantAuthorizer = tenantAuthorizer;
     }
 
     /**
@@ -35,7 +38,8 @@ public class ApprovalController {
             @RequestParam(required = false) Long merchantId,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int size) {
-        Page<ApprovalRequest> result = approvalService.listPending(merchantId, page, size);
+        Long effectiveTenant = tenantAuthorizer.authorize(merchantId);
+        Page<ApprovalRequest> result = approvalService.listPending(effectiveTenant, page, size);
         Map<String, Object> resp = new HashMap<>();
         resp.put("code", 200);
         resp.put("data", result.getRecords());
@@ -62,8 +66,8 @@ public class ApprovalController {
      */
     @PostMapping("/{id}/approve")
     public Map<String, Object> approve(@PathVariable Long id,
-                                       @RequestParam(required = false) Long approverId,
                                        @RequestParam(required = false) String comment) {
+        Long approverId = cn.qihangerp.security.common.SecurityUtils.getUserId();
         boolean success = approvalService.approve(id, approverId, comment);
         Map<String, Object> resp = new HashMap<>();
         resp.put("code", success ? 200 : 400);
@@ -76,8 +80,8 @@ public class ApprovalController {
      */
     @PostMapping("/{id}/reject")
     public Map<String, Object> reject(@PathVariable Long id,
-                                      @RequestParam(required = false) Long approverId,
                                       @RequestParam(required = false) String comment) {
+        Long approverId = cn.qihangerp.security.common.SecurityUtils.getUserId();
         boolean success = approvalService.reject(id, approverId, comment);
         Map<String, Object> resp = new HashMap<>();
         resp.put("code", success ? 200 : 400);
@@ -90,10 +94,7 @@ public class ApprovalController {
      */
     @GetMapping("/{id}")
     public Map<String, Object> getById(@PathVariable Long id) {
-        // 简单通过 traceId 查询后过滤，此处用 mapper 直接查
-        ApprovalRequest approval = approvalService.listByTraceId("").stream()
-                .filter(a -> a.getId().equals(id))
-                .findFirst().orElse(null);
+        ApprovalRequest approval = approvalService.getById(id);
         Map<String, Object> resp = new HashMap<>();
         if (approval != null) {
             resp.put("code", 200);

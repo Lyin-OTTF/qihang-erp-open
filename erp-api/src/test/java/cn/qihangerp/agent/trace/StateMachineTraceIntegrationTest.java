@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.trace;
+import org.junit.jupiter.api.Tag;
 
 import cn.qihangerp.statemachine.IllegalTransitionException;
 import cn.qihangerp.statemachine.StateTransitionEvent;
@@ -9,6 +10,7 @@ import com.mysql.cj.jdbc.MysqlDataSource;
 import org.apache.ibatis.mapping.Environment;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEvent;
@@ -27,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * 的完整链路（不依赖 Spring 上下文），验证状态机确实并入了监视环节，
  * 每次状态迁移（通过/拦截）都能在 agent_trace 表中追溯。</p>
  */
+@Tag("it")
 class StateMachineTraceIntegrationTest {
 
     private TransitionValidator validator;
@@ -74,6 +77,13 @@ class StateMachineTraceIntegrationTest {
 
         testOrderId = "SM-TEST-ORD-" + System.currentTimeMillis();
         testRefundId = "SM-TEST-REF-" + System.currentTimeMillis();
+    }
+
+    @AfterEach
+    void tearDown() {
+        // 清理本次状态迁移写入的 trace，避免污染 agent_trace
+        jdbcTemplate.update("DELETE FROM agent_trace WHERE trace_id LIKE ? OR trace_id LIKE ?",
+                "SM-ORDER-" + testOrderId + "%", "SM-REFUND-" + testRefundId + "%");
     }
 
     @Test

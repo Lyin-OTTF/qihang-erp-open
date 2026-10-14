@@ -51,7 +51,9 @@ public class DistributedLockService {
             boolean acquired = rlock.tryLock(0, ttlSeconds, TimeUnit.SECONDS);
             if (acquired) {
                 log.debug("Redisson获取锁成功: key={}", key);
-                return new LockHandle(key, rlock, true);
+                LockHandle handle = new LockHandle(key, rlock, true);
+                handle.setOnClose(() -> this.unlock(handle));
+                return handle;
             }
             log.debug("Redisson获取锁失败（被占用）: key={}", key);
             return new LockHandle(key, (RLock) null, false);
@@ -77,7 +79,9 @@ public class DistributedLockService {
             boolean acquired = rlock.tryLock(maxWaitMillis, ttlSeconds, TimeUnit.MILLISECONDS);
             if (acquired) {
                 log.debug("Redisson等待获取锁成功: key={}, wait<={}ms", key, maxWaitMillis);
-                return new LockHandle(key, rlock, true);
+                LockHandle handle = new LockHandle(key, rlock, true);
+                handle.setOnClose(() -> this.unlock(handle));
+                return handle;
             }
             log.debug("Redisson等待获取锁超时: key={}, wait={}ms", key, maxWaitMillis);
             return new LockHandle(key, (RLock) null, false);
@@ -119,6 +123,7 @@ public class DistributedLockService {
         private final String token;
         private final boolean acquired;
         private final RLock rlock;
+        private Runnable onClose;
 
         /** 兼容旧构造器（token 保留但不再用于释放校验，Redisson 内部处理） */
         public LockHandle(String key, String token, boolean acquired) {
@@ -136,6 +141,11 @@ public class DistributedLockService {
             this.rlock = rlock;
         }
 
+        /** 设置 close 时的解锁回调（由 DistributedLockService 注入） */
+        public void setOnClose(Runnable onClose) {
+            this.onClose = onClose;
+        }
+
         public String getKey() { return key; }
         public String getToken() { return token; }
         public boolean isAcquired() { return acquired; }
@@ -143,7 +153,9 @@ public class DistributedLockService {
 
         @Override
         public void close() {
-            // unlock 需要外部 DistributedLockService 调用，此处仅标记
+            if (onClose != null) {
+                try { onClose.run(); } catch (Exception e) { /* 解锁失败不影响业务 */ }
+            }
         }
     }
 }

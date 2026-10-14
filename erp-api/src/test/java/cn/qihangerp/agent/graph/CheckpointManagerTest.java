@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.graph;
+import org.junit.jupiter.api.Tag;
 
 import com.mysql.cj.jdbc.MysqlDataSource;
 import org.junit.jupiter.api.AfterAll;
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author 回溯开发-阶段4
  * @since 2026-10-12
  */
+@Tag("it")
 class CheckpointManagerTest {
 
     private static final String TEST_EXECUTION = "cp-test-" + System.currentTimeMillis();

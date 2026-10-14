@@ -2,6 +2,7 @@ package cn.qihangerp.agent.controller;
 
 import cn.qihangerp.agent.trace.TraceEntry;
 import cn.qihangerp.agent.trace.TraceService;
+import cn.qihangerp.agent.tenant.TenantAuthorizer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -11,7 +12,7 @@ import java.util.Map;
 
 /**
  * Agent Trace查询控制器。
- * 提供按traceId查询完整调用链、按商户查询最近trace、查询失败调用等端点。
+ * 列表按登录租户过滤；按traceId查询时，商户用户仅能看到本租户的span。
  */
 @RestController
 @RequestMapping("/api/agent/trace")
@@ -19,6 +20,7 @@ import java.util.Map;
 public class TraceController {
 
     private final TraceService traceService;
+    private final TenantAuthorizer tenantAuthorizer;
 
     /**
      * 按traceId查询完整调用链。
@@ -26,6 +28,11 @@ public class TraceController {
     @GetMapping("/chain/{traceId}")
     public Map<String, Object> getTraceChain(@PathVariable String traceId) {
         List<TraceEntry> chain = traceService.getTraceChain(traceId);
+        Long bound = tenantAuthorizer.currentTenant();
+        if (bound != null) {
+            // 商户用户：仅保留本租户span（防止凭traceId窥探其他租户）
+            chain = chain.stream().filter(e -> bound.equals(e.getMerchantId())).toList();
+        }
         Map<String, Object> result = new HashMap<>();
         result.put("traceId", traceId);
         result.put("spanCount", chain.size());
@@ -38,11 +45,12 @@ public class TraceController {
      */
     @GetMapping("/recent")
     public Map<String, Object> getRecentTraces(
-            @RequestParam Long merchantId,
+            @RequestParam(required = false) Long merchantId,
             @RequestParam(defaultValue = "20") int limit) {
-        List<TraceEntry> traces = traceService.getRecentTraces(merchantId, limit);
+        Long effectiveTenant = tenantAuthorizer.requireTenant(merchantId);
+        List<TraceEntry> traces = traceService.getRecentTraces(effectiveTenant, limit);
         Map<String, Object> result = new HashMap<>();
-        result.put("merchantId", merchantId);
+        result.put("merchantId", effectiveTenant);
         result.put("count", traces.size());
         result.put("traces", traces);
         return result;
@@ -55,7 +63,8 @@ public class TraceController {
     public Map<String, Object> getFailedTraces(
             @RequestParam(required = false) Long merchantId,
             @RequestParam(defaultValue = "20") int limit) {
-        List<TraceEntry> traces = traceService.getFailedTraces(merchantId, limit);
+        Long effectiveTenant = tenantAuthorizer.requireTenant(merchantId);
+        List<TraceEntry> traces = traceService.getFailedTraces(effectiveTenant, limit);
         Map<String, Object> result = new HashMap<>();
         result.put("count", traces.size());
         result.put("traces", traces);

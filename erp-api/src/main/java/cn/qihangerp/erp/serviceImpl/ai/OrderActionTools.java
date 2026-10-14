@@ -48,7 +48,7 @@ public class OrderActionTools {
      * </p>
      */
     @Tool(description = "修改指定订单的商家备注(seller_memo)。仅修改备注文本，不影响订单状态、库存和金额。需要人工确认后执行。")
-    @ToolPolicy(level = AutonomyLevel.ESCALATE, category = "订单操作")
+    @ToolPolicy(level = AutonomyLevel.ESCALATE, category = "订单操作", description = "修改订单商家备注")
     public String updateOrderSellerMemo(
             @ToolParam(description = "订单ID(oms_shop_order表的主键id)") Long orderId,
             @ToolParam(description = "新的商家备注内容") String memo) {

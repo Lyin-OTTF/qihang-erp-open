@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.approval;
+import org.junit.jupiter.api.Tag;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.extension.plugins.MybatisPlusInterceptor;
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author 回溯开发-搁置项攻关
  * @since 2026-10-12
  */
+@Tag("it")
 class ApprovalServiceTest {
 
     private static final String TEST_TRACE = "approval-test-" + System.currentTimeMillis();
@@ -57,7 +59,7 @@ class ApprovalServiceTest {
 
         SqlSession session = sqlSessionFactory.openSession(true);
         ApprovalRequestMapper mapper = session.getMapper(ApprovalRequestMapper.class);
-        approvalService = new ApprovalService(mapper, new ObjectMapper());
+        approvalService = new ApprovalService(mapper, new ObjectMapper(), null);
     }
 
     @AfterAll

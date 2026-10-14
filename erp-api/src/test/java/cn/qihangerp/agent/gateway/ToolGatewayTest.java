@@ -50,17 +50,20 @@ class ToolGatewayTest {
     }
 
     /**
-     * 测试2：缺少@ToolPolicy注解时使用默认OBSERVE策略
+     * 测试2：缺少@ToolPolicy注解时使用默认ESCALATE策略（fail-closed，需人工审批）
      */
     @Test
-    void testExecuteToolWithoutPolicyAnnotation() throws ToolGateway.ToolExecutionException {
-        Object result = toolGateway.execute(
-                mockTool,
-                "methodWithoutPolicy",
-                context
+    void testExecuteToolWithoutPolicyAnnotation() {
+        // 无策略注解的工具走默认ESCALATE fail-closed，应抛出ApprovalRequiredException
+        ToolGateway.ApprovalRequiredException exception = assertThrows(
+                ToolGateway.ApprovalRequiredException.class,
+                () -> toolGateway.execute(
+                        mockTool,
+                        "methodWithoutPolicy",
+                        context
+                )
         );
-
-        assertEquals("无策略注解的方法", result);
+        assertNotNull(exception.getMessage());
     }
 
     /**
@@ -100,28 +103,34 @@ class ToolGatewayTest {
     }
 
     /**
-     * 测试5：缺失租户ID时告警放行（回溯开发-阶段1调整，向后兼容）
+     * 测试5：缺失租户ID时 fail-closed（第2期 堵越权）
      *
-     * 原行为：requiresTenantIsolation=true 且 merchantId=null 时抛出 ToolExecutionException。
-     * 现行为：记录 warn 日志后放行，工具层在 TenantContext 有值时自行过滤，无值时保持原行为。
-     * 此变更是为了不破坏现有未携带租户头的调用链路。
+     * requiresTenantIsolation=true 且 merchantId=null 时，必须拒绝执行（ToolExecutionException），
+     * 不允许告警放行去查全租户。
      */
     @Test
-    void testTenantIsolationOptionalForBackwardCompat() {
+    void testTenantIsolationFailClosed() {
         ToolExecutionContext contextWithoutMerchant = new ToolExecutionContext();
         contextWithoutMerchant.setUserId(100L);
         contextWithoutMerchant.setTraceId("test-trace-002");
         // merchantId为null
 
-        Object result = assertDoesNotThrow(() -> toolGateway.execute(
-                mockTool,
-                "readOnlyQuery",
-                contextWithoutMerchant,
-                "param"
-        ));
-
-        assertEquals("查询结果: param", result,
-                "缺失租户ID时应告警放行并正常执行，而非抛出异常");
+        ToolGateway.ToolExecutionException ex = assertThrows(
+                ToolGateway.ToolExecutionException.class,
+                () -> toolGateway.execute(
+                        mockTool,
+                        "readOnlyQuery",
+                        contextWithoutMerchant,
+                        "param"
+                )
+        );
+        boolean rejected = ex.getMessage() != null && ex.getMessage().contains("缺少租户ID");
+        if (!rejected && ex.getCause() != null && ex.getCause().getMessage() != null) {
+            // 网关的兜底 catch 会把原异常包装为 "Tool执行失败"，原 fail-closed 原因在 cause 中
+            rejected = ex.getCause().getMessage().contains("缺少租户ID");
+        }
+        assertTrue(rejected,
+                "缺失租户ID时应 fail-closed 拒绝执行，实际信息: " + ex.getMessage());
     }
 
     /**

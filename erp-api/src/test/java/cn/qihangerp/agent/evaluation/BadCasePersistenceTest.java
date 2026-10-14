@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.evaluation;
+import org.junit.jupiter.api.Tag;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -27,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author 回溯开发-阶段2
  * @since 2026-10-12
  */
+@Tag("it")
 class BadCasePersistenceTest {
 
     private static final String TEST_TRACE_ID = "badcase-test-" + System.currentTimeMillis();

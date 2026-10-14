@@ -1,4 +1,5 @@
 package cn.qihangerp.erp.serviceImpl.ai;
+import org.junit.jupiter.api.Tag;
 
 import cn.qihangerp.agent.tenant.TenantContext;
 import cn.qihangerp.mapper.ShopOrderMapper;
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author 回溯开发-阶段1
  * @since 2026-10-12
  */
+@Tag("it")
 class TenantIsolationE2ETest {
 
     private static final Long TENANT_A = 999001L;

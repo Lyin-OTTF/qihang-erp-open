@@ -1,4 +1,5 @@
 package cn.qihangerp.agent.gateway;
+import org.junit.jupiter.api.Tag;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -20,6 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author 回溯开发-搁置项攻关
  * @since 2026-10-12
  */
+@Tag("it")
 class IdempotencyGuardTest {
 
     private static StringRedisTemplate redisTemplate;
