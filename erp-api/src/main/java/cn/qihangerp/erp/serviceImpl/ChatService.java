@@ -33,6 +33,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,36 +69,80 @@ public class ChatService {
             由你自行对数据进行分组、排序、统计、对比，得出结论。
             """;
 
+    /** 记忆上下文总 token 预算（近似：中文1字≈1.5token，此处用字符数*1.5估算） */
+    private static final int MEMORY_TOKEN_BUDGET = 2000;
+    /** 单层记忆字符预算（TEAM/USER/SESSION 各占约1/3，留余量） */
+    private static final int LAYER_CHAR_BUDGET = 450;
+
     /**
      * 从记忆系统读取上下文，注入到系统提示中。
      * 读取顺序：TEAM（商户共享）→ USER（用户偏好）→ SESSION（当前会话）
+     *
+     * <p>Token 预算控制：每层记忆有独立字符预算，超过时按 key 倒序截断
+     * （保留最新的记忆），防止记忆无限膨胀撑爆 SystemMessage。</p>
      */
     private String buildMemoryContext(String sessionId, Long userId, Long merchantId) {
         StringBuilder ctx = new StringBuilder();
+        int totalChars = 0;
         try {
-            // TEAM层：商户/团队共享知识
+            // TEAM层：商户/团队共享知识（优先级最高，预算最大）
             if (merchantId != null) {
                 List<String> teamKeys = memoryManager.listKeys(MemoryLayer.TEAM, merchantId.toString(), merchantId);
+                // 倒序：最新的 key 优先（listKeys 通常按时间排序，倒序取最新）
+                Collections.reverse(teamKeys);
+                int layerChars = 0;
                 for (String key : teamKeys) {
                     String val = memoryManager.retrieve(MemoryLayer.TEAM, merchantId.toString(), key, merchantId);
-                    if (val != null) ctx.append("- 团队知识[").append(key).append("]: ").append(val).append("\n");
+                    if (val == null) continue;
+                    String entry = "- 团队知识[" + key + "]: " + val + "\n";
+                    if (layerChars + entry.length() > LAYER_CHAR_BUDGET) {
+                        log.debug("TEAM层记忆超预算，截断: 已用{}字符, 当前key={}", layerChars, key);
+                        break;
+                    }
+                    ctx.append(entry);
+                    layerChars += entry.length();
                 }
+                totalChars += layerChars;
             }
             // USER层：用户个人偏好/习惯
             if (userId != null) {
                 List<String> userKeys = memoryManager.listKeys(MemoryLayer.USER, userId.toString(), merchantId);
+                Collections.reverse(userKeys);
+                int layerChars = 0;
                 for (String key : userKeys) {
                     String val = memoryManager.retrieve(MemoryLayer.USER, userId.toString(), key, merchantId);
-                    if (val != null) ctx.append("- 用户偏好[").append(key).append("]: ").append(val).append("\n");
+                    if (val == null) continue;
+                    String entry = "- 用户偏好[" + key + "]: " + val + "\n";
+                    if (layerChars + entry.length() > LAYER_CHAR_BUDGET) {
+                        log.debug("USER层记忆超预算，截断: 已用{}字符, 当前key={}", layerChars, key);
+                        break;
+                    }
+                    ctx.append(entry);
+                    layerChars += entry.length();
                 }
+                totalChars += layerChars;
             }
             // SESSION层：当前会话上下文（重启可恢复）
             if (sessionId != null) {
                 List<String> sessionKeys = memoryManager.listKeys(MemoryLayer.SESSION, sessionId, merchantId);
+                Collections.reverse(sessionKeys);
+                int layerChars = 0;
                 for (String key : sessionKeys) {
                     String val = memoryManager.retrieve(MemoryLayer.SESSION, sessionId, key, merchantId);
-                    if (val != null) ctx.append("- 会话记忆[").append(key).append("]: ").append(val).append("\n");
+                    if (val == null) continue;
+                    String entry = "- 会话记忆[" + key + "]: " + val + "\n";
+                    if (layerChars + entry.length() > LAYER_CHAR_BUDGET) {
+                        log.debug("SESSION层记忆超预算，截断: 已用{}字符, 当前key={}", layerChars, key);
+                        break;
+                    }
+                    ctx.append(entry);
+                    layerChars += entry.length();
                 }
+                totalChars += layerChars;
+            }
+            if (totalChars > 0) {
+                log.debug("记忆上下文: 总{}字符(≈{}token), 预算{}token",
+                        totalChars, (int)(totalChars * 1.5), MEMORY_TOKEN_BUDGET);
             }
         } catch (Exception e) {
             log.warn("读取记忆上下文失败（不影响对话）: {}", e.getMessage());

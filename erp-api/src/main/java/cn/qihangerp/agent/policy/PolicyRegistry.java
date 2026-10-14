@@ -146,13 +146,18 @@ public class PolicyRegistry {
     /**
      * 更新或插入一条DB策略，并立即刷新内存。
      *
+     * <p>synchronized 保证"查不存在则插入"的原子性。
+     * MySQL 唯一索引 uk_tool_merchant(tool_name, merchant_id) 对 merchant_id IS NULL
+     * 不约束（唯一索引允许多个NULL），并发调用可能插出多行导致后续 selectOne 抛异常。
+     * 此方法仅管理员改策略时调用，频率极低，synchronized 性能影响可忽略。</p>
+     *
      * @param toolName       工具名
      * @param autonomyLevel  自治等级
      * @param category       分类（可为null）
      * @param description    描述（可为null）
      * @return 更新后的策略元数据
      */
-    public ToolPolicyMetadata updatePolicy(String toolName, AutonomyLevel autonomyLevel,
+    public synchronized ToolPolicyMetadata updatePolicy(String toolName, AutonomyLevel autonomyLevel,
                                            String category, String description) {
         AgentToolPolicy existing = policyMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<AgentToolPolicy>()

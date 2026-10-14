@@ -26,6 +26,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Slf4j
 public class DAGScheduler {
 
+    /** 节点完成监听器（可选，用于中途保存 checkpoint 等） */
+    public interface NodeCompleteListener {
+        void onNodeComplete(String nodeId, NodeStatus status, ExecutionContext context);
+    }
+
+    private NodeCompleteListener nodeCompleteListener;
+
+    public void setNodeCompleteListener(NodeCompleteListener listener) {
+        this.nodeCompleteListener = listener;
+    }
+
     private final ExecutorService executor;
     private final FailurePropagator failurePropagator;
     private final int maxParallelism;
@@ -146,12 +157,14 @@ public class DAGScheduler {
                 context.setNodeOutput(node.getId(), result);
                 context.setNodeStatus(node.getId(), NodeStatus.SUCCESS);
                 log.debug("节点执行成功: {}", node.getId());
+                notifyNodeComplete(node.getId(), NodeStatus.SUCCESS, context);
                 return;
             } catch (Exception e) {
                 log.warn("节点执行失败: {} (尝试 {}/{}): {}", node.getId(), attempts, maxAttempts, e.getMessage());
                 if (attempts >= maxAttempts) {
                     context.setNodeStatus(node.getId(), NodeStatus.FAILED);
                     context.setNodeError(node.getId(), e.getMessage());
+                    notifyNodeComplete(node.getId(), NodeStatus.FAILED, context);
                     // 传播失败
                     failurePropagator.propagateFailure(node.getId(), nodeMap, context);
                 } else {
@@ -233,6 +246,19 @@ public class DAGScheduler {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * 通知节点完成监听器（异常不影响主流程）
+     */
+    private void notifyNodeComplete(String nodeId, NodeStatus status, ExecutionContext context) {
+        if (nodeCompleteListener != null) {
+            try {
+                nodeCompleteListener.onNodeComplete(nodeId, status, context);
+            } catch (Exception e) {
+                log.warn("节点完成监听器执行失败（不影响主流程）: node={}, {}", nodeId, e.getMessage());
+            }
         }
     }
 

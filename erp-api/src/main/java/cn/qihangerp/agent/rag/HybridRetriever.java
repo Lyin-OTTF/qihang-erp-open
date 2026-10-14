@@ -42,18 +42,23 @@ public class HybridRetriever {
     // PGVector向量检索器（可选，配置后自动启用）
     private final PgVectorRetriever pgVectorRetriever;
 
+    // Rerank 重排序器（可选，配置后自动启用）
+    private final Reranker reranker;
+
     @Autowired
     public HybridRetriever(BM25Retriever bm25Retriever,
                            MysqlFullTextRetriever mysqlFullTextRetriever,
-                           @Autowired(required = false) PgVectorRetriever pgVectorRetriever) {
+                           @Autowired(required = false) PgVectorRetriever pgVectorRetriever,
+                           @Autowired(required = false) Reranker reranker) {
         this.bm25Retriever = bm25Retriever;
         this.mysqlFullTextRetriever = mysqlFullTextRetriever;
         this.pgVectorRetriever = pgVectorRetriever;
+        this.reranker = reranker;
     }
 
-    /** 兼容构造函数（PGVector未配置时使用） */
+    /** 兼容构造函数（PGVector/Reranker未配置时使用） */
     public HybridRetriever(BM25Retriever bm25Retriever, MysqlFullTextRetriever mysqlFullTextRetriever) {
-        this(bm25Retriever, mysqlFullTextRetriever, null);
+        this(bm25Retriever, mysqlFullTextRetriever, null, null);
     }
 
     /**
@@ -76,6 +81,11 @@ public class HybridRetriever {
 
         // 步骤2: RRF融合
         List<RetrievalResult> fusedResults = fuseWithRRF(vectorResults, bm25Results);
+
+        // 步骤2.5: Rerank 重排序（对 Top-N 候选做二次排序，提升相关性）
+        if (reranker != null && reranker.isRerankEnabled()) {
+            fusedResults = reranker.rerank(query, fusedResults, topK * 2);
+        }
 
         // 步骤3: 截取Top-K
         List<RetrievalResult> topKResults = fusedResults.stream()

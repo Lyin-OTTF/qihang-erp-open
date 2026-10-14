@@ -108,6 +108,15 @@ public class AgentWorkflowService {
                 WORKFLOW_AFTER_SALES, executionId, orderId, refundId);
 
         List<DAGNode> nodes = buildAfterSalesNodes();
+
+        // 注册节点完成监听器：每个节点完成后保存 checkpoint，支持中途崩溃恢复
+        dagScheduler.setNodeCompleteListener((nodeId, status, ctx) -> {
+            if (status == NodeStatus.SUCCESS || status == NodeStatus.FAILED) {
+                saveCheckpoint(ctx);
+                log.debug("节点完成后保存checkpoint: node={}, status={}", nodeId, status);
+            }
+        });
+
         dagScheduler.execute(nodes, context);
 
         // 保存最终快照
@@ -245,40 +254,78 @@ public class AgentWorkflowService {
                 .build());
 
         // 5. 执行退款处理（依赖4，写操作带补偿，状态机校验+租户过滤）
+        // 同时更新售后单状态和订单状态（售后处理完成后订单变为已完成）
         nodes.add(DAGNode.builder("process_refund")
                 .name("执行退款处理")
                 .dependsOn("validate_transition")
                 .executor(ctx -> {
                     Long refundId = ctx.get("refundId", Long.class);
+                    Long orderId = ctx.get("orderId", Long.class);
                     Long merchantId = ctx.get("merchantId", Long.class);
-                    Integer originalStatus = ctx.get("originalRefundStatus", Integer.class);
+                    Integer originalRefundStatus = ctx.get("originalRefundStatus", Integer.class);
+                    Integer originalOrderStatus = ctx.get("currentOrderStatus", Integer.class);
+
                     // 状态机校验：当前售后状态 → 3(退款中)
-                    transitionValidator.validateRefundTransition(
-                            originalStatus, 3, String.valueOf(refundId));
-                    // 租户过滤更新
-                    LambdaUpdateWrapper<ShopRefund> wrapper = new LambdaUpdateWrapper<>();
-                    wrapper.eq(ShopRefund::getId, refundId);
-                    if (merchantId != null) {
-                        wrapper.eq(ShopRefund::getMerchantId, merchantId);
+                    if (originalRefundStatus == null) {
+                        throw new RuntimeException("无法获取售后单当前状态，refundId=" + refundId);
                     }
-                    wrapper.set(ShopRefund::getStatus, 3);
-                    shopRefundMapper.update(null, wrapper);
+                    transitionValidator.validateRefundTransition(
+                            originalRefundStatus, 3, String.valueOf(refundId));
+
+                    // 更新售后单状态为3(退款中)
+                    LambdaUpdateWrapper<ShopRefund> refundWrapper = new LambdaUpdateWrapper<>();
+                    refundWrapper.eq(ShopRefund::getId, refundId);
+                    if (merchantId != null) {
+                        refundWrapper.eq(ShopRefund::getMerchantId, merchantId);
+                    }
+                    refundWrapper.set(ShopRefund::getStatus, 3);
+                    shopRefundMapper.update(null, refundWrapper);
                     ctx.put("refundUpdated", true);
-                    return "refund_status_updated_to_3";
+
+                    // 同步更新订单状态为3(已完成) — 修复：之前只校验不更新
+                    if (originalOrderStatus != null) {
+                        LambdaUpdateWrapper<ShopOrder> orderWrapper = new LambdaUpdateWrapper<>();
+                        orderWrapper.eq(ShopOrder::getId, orderId);
+                        if (merchantId != null) {
+                            orderWrapper.eq(ShopOrder::getMerchantId, merchantId);
+                        }
+                        orderWrapper.set(ShopOrder::getOrderStatus, 3);
+                        shopOrderMapper.update(null, orderWrapper);
+                        ctx.put("orderStatusUpdated", true);
+                        log.info("订单状态已同步更新: orderId={}, {} -> 3", orderId, originalOrderStatus);
+                    }
+
+                    return "refund_status_updated_to_3_and_order_completed";
                 })
                 .compensator(ctx -> {
                     Long refundId = ctx.get("refundId", Long.class);
+                    Long orderId = ctx.get("orderId", Long.class);
                     Long merchantId = ctx.get("merchantId", Long.class);
-                    Integer originalStatus = ctx.get("originalRefundStatus", Integer.class);
-                    if (originalStatus != null && Boolean.TRUE.equals(ctx.get("refundUpdated", Boolean.class))) {
+                    Integer originalRefundStatus = ctx.get("originalRefundStatus", Integer.class);
+                    Integer originalOrderStatus = ctx.get("currentOrderStatus", Integer.class);
+
+                    // 回滚售后单状态
+                    if (originalRefundStatus != null && Boolean.TRUE.equals(ctx.get("refundUpdated", Boolean.class))) {
                         LambdaUpdateWrapper<ShopRefund> wrapper = new LambdaUpdateWrapper<>();
                         wrapper.eq(ShopRefund::getId, refundId);
                         if (merchantId != null) {
                             wrapper.eq(ShopRefund::getMerchantId, merchantId);
                         }
-                        wrapper.set(ShopRefund::getStatus, originalStatus);
+                        wrapper.set(ShopRefund::getStatus, originalRefundStatus);
                         shopRefundMapper.update(null, wrapper);
-                        log.info("补偿回滚: 退款状态恢复为{}", originalStatus);
+                        log.info("补偿回滚: 退款状态恢复为{}", originalRefundStatus);
+                    }
+
+                    // 回滚订单状态
+                    if (originalOrderStatus != null && Boolean.TRUE.equals(ctx.get("orderStatusUpdated", Boolean.class))) {
+                        LambdaUpdateWrapper<ShopOrder> orderWrapper = new LambdaUpdateWrapper<>();
+                        orderWrapper.eq(ShopOrder::getId, orderId);
+                        if (merchantId != null) {
+                            orderWrapper.eq(ShopOrder::getMerchantId, merchantId);
+                        }
+                        orderWrapper.set(ShopOrder::getOrderStatus, originalOrderStatus);
+                        shopOrderMapper.update(null, orderWrapper);
+                        log.info("补偿回滚: 订单状态恢复为{}", originalOrderStatus);
                     }
                     return null;
                 })
@@ -299,8 +346,15 @@ public class AgentWorkflowService {
                     ShopOrder order = shopOrderMapper.selectOne(qw);
                     String originalMemo = order != null ? order.getSellerMemo() : null;
                     ctx.put("originalSellerMemo", originalMemo);
+                    // 修复：检查是否已追加过，避免 resume 重复执行时重复追加
+                    String memoSuffix = "[AI售后处理] 已自动处理退款流程";
+                    if (originalMemo != null && originalMemo.contains(memoSuffix)) {
+                        log.info("卖家备注已包含AI售后标记，跳过重复追加: orderId={}", orderId);
+                        ctx.put("memoUpdated", false);
+                        return "memo_already_contains_marker_skipped";
+                    }
                     String newMemo = (originalMemo == null ? "" : originalMemo)
-                            + "[AI售后处理] 已自动处理退款流程";
+                            + memoSuffix;
                     LambdaUpdateWrapper<ShopOrder> wrapper = new LambdaUpdateWrapper<>();
                     wrapper.eq(ShopOrder::getId, orderId);
                     if (merchantId != null) {
