@@ -31,6 +31,11 @@ public class RagEvaluationMetrics {
     @Data
     public static class RetrievalMetrics {
         /**
+         * 是否存在可用的相关性标注。未标注用例不参与检索均值。
+         */
+        private boolean annotated;
+
+        /**
          * 召回率（Recall）
          * 定义：检索到的相关文档数 / 所有相关文档数
          */
@@ -145,16 +150,6 @@ public class RagEvaluationMetrics {
             overall = new OverallMetrics();
         }
 
-        double retrievalScore = 0.0;
-        if (retrieval != null) {
-            retrievalScore = (retrieval.getPrecision() + retrieval.getRecall() + retrieval.getF1Score()) / 3.0;
-        }
-
-        double generationScore = 0.0;
-        if (generation != null) {
-            generationScore = (generation.getAnswerRelevancy() + generation.getAnswerCorrectness() + generation.getFaithfulness()) / 3.0;
-        }
-
         double performanceScore = 1.0;
         if (overall.getTotalTime() > 5000) {
             performanceScore = 0.5; // 超过5秒性能较差
@@ -164,8 +159,23 @@ public class RagEvaluationMetrics {
             performanceScore = 0.9; // 1-3秒性能良好
         }
 
-        double score = retrievalScore * 0.4 + generationScore * 0.4 + performanceScore * 0.2;
-        overall.setOverallScore(score * 100);
+        double weightedScore = performanceScore * 0.2;
+        double totalWeight = 0.2;
+        if (retrieval != null && retrieval.isAnnotated()) {
+            double retrievalScore = (retrieval.getPrecision() + retrieval.getRecall()
+                    + retrieval.getF1Score()) / 3.0;
+            weightedScore += retrievalScore * 0.4;
+            totalWeight += 0.4;
+        }
+        if (generation != null) {
+            double generationScore = (generation.getAnswerRelevancy()
+                    + generation.getAnswerCorrectness()
+                    + generation.getFaithfulness()) / 3.0;
+            weightedScore += generationScore * 0.4;
+            totalWeight += 0.4;
+        }
+
+        overall.setOverallScore(totalWeight == 0.0 ? 0.0 : weightedScore / totalWeight * 100);
 
         // 判断是否通过（综合评分>=60分）
         overall.setPassed(overall.getOverallScore() >= 60.0);

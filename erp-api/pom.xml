@@ -184,6 +184,11 @@
             <version>5.10.0</version>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
 
         <!-- ============ Redis（分层记忆）============ -->
         <dependency>
@@ -245,8 +250,8 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- 默认只跑单元测试；集成测试需外部 MySQL/Redis，用 @Tag("it") 隔离 -->
-                    <excludedGroups>it</excludedGroups>
+                    <!-- 默认只跑单元测试；集成测试需外部依赖，真实LLM评测还会产生API费用 -->
+                    <excludedGroups>it,llm</excludedGroups>
                 </configuration>
             </plugin>
         </plugins>
@@ -278,6 +283,22 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
+                            <excludedGroups combine.self="override">llm</excludedGroups>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <!-- 真实LLM评测（调用外部模型，产生费用）：mvn -pl erp-api test -Prag-llm-eval -->
+        <profile>
+            <id>rag-llm-eval</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <groups>llm</groups>
                             <excludedGroups combine.self="override"></excludedGroups>
                         </configuration>
                     </plugin>

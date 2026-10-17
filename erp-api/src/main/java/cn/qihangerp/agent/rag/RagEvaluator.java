@@ -1,11 +1,17 @@
 package cn.qihangerp.agent.rag;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.PreparedStatement;
+import java.sql.Statement;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -31,6 +37,7 @@ public class RagEvaluator {
     private final HybridRetriever hybridRetriever;
     private final CitationGenerator citationGenerator;
     private final LlmEvaluationService llmEvaluationService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 运行完整评测并持久化结果
@@ -40,47 +47,79 @@ public class RagEvaluator {
      * @param remark     备注
      * @return 评测报告
      */
+    @Transactional(rollbackFor = Exception.class)
     public RagEvaluationReport runEvaluationAndPersist(Long merchantId, int topK, String remark) {
-        RagEvaluationReport report = runEvaluation(merchantId, topK);
-        persistResult(merchantId, topK, report, remark);
+        return runEvaluationAndPersist(merchantId, topK, remark, new EvaluationOptions());
+    }
+
+    /**
+     * 运行评测并持久化聚合结果和逐用例明细。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public RagEvaluationReport runEvaluationAndPersist(Long merchantId, int topK, String remark,
+                                                       EvaluationOptions options) {
+        RagEvaluationReport report = runEvaluation(merchantId, topK, options);
+        Long runId = persistResult(merchantId, topK, report, remark, options);
+        report.setRunId(runId);
         return report;
     }
 
     /**
      * 持久化评测结果到agent_rag_eval_result表
      */
-    private void persistResult(Long merchantId, int topK, RagEvaluationReport report, String remark) {
+    private Long persistResult(Long merchantId, int topK, RagEvaluationReport report,
+                               String remark, EvaluationOptions options) {
         try {
             String sql = "INSERT INTO agent_rag_eval_result " +
                     "(merchant_id, eval_time, total_cases, passed_cases, pass_rate, " +
                     "avg_recall, avg_precision, avg_f1, avg_mrr, avg_ndcg, " +
                     "avg_answer_relevancy, avg_answer_correctness, avg_faithfulness, " +
                     "avg_retrieval_time, avg_generation_time, avg_overall_score, " +
-                    "total_time, top_k, retrieval_mode, remark) " +
-                    "VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-            jdbcTemplate.update(sql,
-                    merchantId,
-                    report.getTotalCases(),
-                    report.getPassedCases(),
-                    report.getPassRate(),
-                    report.getAvgRecall(),
-                    report.getAvgPrecision(),
-                    report.getAvgF1(),
-                    report.getAvgMRR(),
-                    report.getAvgNDCG(),
-                    report.getAvgAnswerRelevancy(),
-                    report.getAvgAnswerCorrectness(),
-                    report.getAvgFaithfulness(),
-                    report.getAvgRetrievalTime(),
-                    report.getAvgGenerationTime(),
-                    report.getAvgOverallScore(),
-                    report.getTotalTime(),
-                    topK,
-                    "HYBRID",
-                    remark);
+                    "total_time, top_k, retrieval_mode, remark, retrieval_cases, llm_used, " +
+                    "llm_rated_cases, avg_bleu, avg_rouge_l, model_name, evaluation_mode) " +
+                    "VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            KeyHolder keyHolder = new GeneratedKeyHolder();
+            jdbcTemplate.update(connection -> {
+                PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
+                int index = 1;
+                ps.setLong(index++, merchantId);
+                ps.setInt(index++, report.getTotalCases());
+                ps.setInt(index++, report.getPassedCases());
+                ps.setDouble(index++, report.getPassRate());
+                ps.setDouble(index++, report.getAvgRecall());
+                ps.setDouble(index++, report.getAvgPrecision());
+                ps.setDouble(index++, report.getAvgF1());
+                ps.setDouble(index++, report.getAvgMRR());
+                ps.setDouble(index++, report.getAvgNDCG());
+                ps.setDouble(index++, report.getAvgAnswerRelevancy());
+                ps.setDouble(index++, report.getAvgAnswerCorrectness());
+                ps.setDouble(index++, report.getAvgFaithfulness());
+                ps.setLong(index++, report.getAvgRetrievalTime());
+                ps.setLong(index++, report.getAvgGenerationTime());
+                ps.setDouble(index++, report.getAvgOverallScore());
+                ps.setLong(index++, report.getTotalTime());
+                ps.setInt(index++, topK);
+                ps.setString(index++, "HYBRID");
+                ps.setString(index++, remark);
+                ps.setInt(index++, report.getRetrievalCases());
+                ps.setBoolean(index++, report.isLlmUsed());
+                ps.setInt(index++, report.getLlmRatedCases());
+                ps.setDouble(index++, report.getAvgBleu());
+                ps.setDouble(index++, report.getAvgRougeL());
+                ps.setString(index++, report.getModelName());
+                ps.setString(index++, report.getEvaluationMode());
+                return ps;
+            }, keyHolder);
+            Number key = keyHolder.getKey();
+            if (key == null) {
+                throw new IllegalStateException("评测结果未返回自增ID");
+            }
+            Long runId = key.longValue();
+            persistCaseResults(runId, merchantId, report);
             log.info("评测结果已持久化: merchantId={}, passRate={}%", merchantId, String.format("%.2f", report.getPassRate()));
+            return runId;
         } catch (Exception e) {
-            log.error("持久化评测结果失败: {}", e.getMessage(), e);
+            throw new IllegalStateException("持久化评测结果失败: " + e.getMessage(), e);
         }
     }
 
@@ -90,7 +129,8 @@ public class RagEvaluator {
     public List<java.util.Map<String, Object>> getRecentResults(Long merchantId, int limit) {
         String sql = "SELECT id, eval_time, total_cases, passed_cases, pass_rate, " +
                 "avg_recall, avg_precision, avg_f1, avg_mrr, avg_ndcg, " +
-                "avg_overall_score, total_time, retrieval_mode, remark " +
+                "avg_overall_score, total_time, retrieval_mode, remark, retrieval_cases, " +
+                "llm_used, llm_rated_cases, avg_bleu, avg_rouge_l, model_name, evaluation_mode " +
                 "FROM agent_rag_eval_result " +
                 "WHERE merchant_id = ? " +
                 "ORDER BY eval_time DESC LIMIT ?";
@@ -105,24 +145,42 @@ public class RagEvaluator {
      * @return 评测报告
      */
     public RagEvaluationReport runEvaluation(Long merchantId, int topK) {
+        return runEvaluation(merchantId, topK, new EvaluationOptions());
+    }
+
+    public RagEvaluationReport runEvaluation(Long merchantId, int topK, EvaluationOptions options) {
         log.info("开始RAG离线评测: merchantId={}, topK={}", merchantId, topK);
+        if (options == null) {
+            options = new EvaluationOptions();
+        }
+        if (options.isRequireLlm()
+                && (llmEvaluationService == null || !llmEvaluationService.isLlmEnabled())) {
+            throw new IllegalStateException("真实LLM评测已启用，但LlmEvaluationService不可用或未开启");
+        }
 
         long startTime = System.currentTimeMillis();
 
         // 步骤1: 加载评测集
         List<EvaluationCase> cases = loadEvaluationCases(merchantId);
+        if (options.getMaxCases() != null && options.getMaxCases() > 0
+                && cases.size() > options.getMaxCases()) {
+            cases = new ArrayList<>(cases.subList(0, options.getMaxCases()));
+        }
         log.info("加载{}条评测用例", cases.size());
 
         // 步骤2: 逐个评测
         List<RagEvaluationMetrics> metricsList = new ArrayList<>();
+        List<CaseEvaluationResult> caseResults = new ArrayList<>();
         int passedCount = 0;
 
         for (int i = 0; i < cases.size(); i++) {
             EvaluationCase testCase = cases.get(i);
             log.info("评测用例 {}/{}: {}", i + 1, cases.size(), testCase.getQuestion());
 
-            RagEvaluationMetrics metrics = evaluateSingleCase(testCase, topK, merchantId);
+            CaseEvaluation evaluation = evaluateSingleCase(testCase, topK, merchantId, options);
+            RagEvaluationMetrics metrics = evaluation.getMetrics();
             metricsList.add(metrics);
+            caseResults.add(buildCaseResult(testCase, evaluation));
 
             if (metrics.getOverall().isPassed()) {
                 passedCount++;
@@ -131,7 +189,18 @@ public class RagEvaluator {
 
         // 步骤3: 聚合统计
         RagEvaluationReport report = aggregateMetrics(metricsList, cases.size(), passedCount);
+        report.setCaseResults(caseResults);
+        report.setLlmRatedCases((int) caseResults.stream()
+                .filter(CaseEvaluationResult::isLlmUsed)
+                .count());
         report.setTotalTime(System.currentTimeMillis() - startTime);
+        report.setEvaluationMode(options.isRequireLlm()
+                ? "LLM_STRICT"
+                : (llmEvaluationService != null && llmEvaluationService.isLlmEnabled()
+                ? "LLM_WITH_FALLBACK" : "HEURISTIC"));
+        report.setModelName(llmEvaluationService != null && llmEvaluationService.isLlmEnabled()
+                ? llmEvaluationService.getModelName() : "heuristic");
+        report.setLlmUsed(report.getLlmRatedCases() > 0);
 
         log.info("RAG离线评测完成: 总用例={}, 通过={}, 通过率={}%",
                 cases.size(), passedCount, String.format("%.2f", report.getPassRate()));
@@ -142,7 +211,8 @@ public class RagEvaluator {
     /**
      * 评测单个用例
      */
-    private RagEvaluationMetrics evaluateSingleCase(EvaluationCase testCase, int topK, Long merchantId) {
+    private CaseEvaluation evaluateSingleCase(EvaluationCase testCase, int topK, Long merchantId,
+                                              EvaluationOptions options) {
         RagEvaluationMetrics metrics = new RagEvaluationMetrics();
 
         // 步骤1: 检索评测
@@ -161,19 +231,22 @@ public class RagEvaluator {
         );
         metrics.setRetrieval(retrievalMetrics);
 
-        // 步骤2: 生成评测（LLM启用时调用真实大模型，否则用启发式拼接）
+        // 步骤2: 生成评测
         long generationStart = System.currentTimeMillis();
         String generatedAnswer = null;
         boolean llmUsed = false;
-        if (llmEvaluationService != null && llmEvaluationService.isLlmEnabled()) {
+        boolean llmEnabled = llmEvaluationService != null && llmEvaluationService.isLlmEnabled();
+        if (llmEnabled) {
             generatedAnswer = llmEvaluationService.generateAnswer(testCase.getQuestion(), retrievalResults);
-            if (generatedAnswer != null) llmUsed = true;
+            if (generatedAnswer != null && !generatedAnswer.isBlank()) {
+                llmUsed = true;
+            } else if (options.isRequireLlm()) {
+                throw new IllegalStateException("LLM答案生成失败: " + testCase.getQuestion());
+            }
         }
-        if (generatedAnswer == null) {
+        if (generatedAnswer == null || generatedAnswer.isBlank()) {
             generatedAnswer = generateAnswer(retrievalResults, testCase.getQuestion());
         }
-        long generationTime = System.currentTimeMillis() - generationStart;
-
         // 步骤2.5: 生成质量打分（LLM启用时用LLM-as-judge，否则用启发式）
         RagEvaluationMetrics.GenerationMetrics generationMetrics;
         if (llmUsed && llmEvaluationService != null) {
@@ -182,23 +255,30 @@ public class RagEvaluator {
                     generatedAnswer, retrievalResults);
             if (scores != null) {
                 generationMetrics = new RagEvaluationMetrics.GenerationMetrics();
-                generationMetrics.setGenerationTime(generationTime);
+                generationMetrics.setGenerationTime(0L);
                 generationMetrics.setAnswerRelevancy(scores[0]);
                 generationMetrics.setAnswerCorrectness(scores[1]);
                 generationMetrics.setFaithfulness(scores[2]);
-                // LLM打分时上下文利用率和BLEU/ROUGE仍用启发式补充
+                // 上下文利用率是确定性辅助指标；BLEU/ROUGE使用标准算法
                 generationMetrics.setContextUtilization(calculateContextUtilization(generatedAnswer, retrievalResults));
-                generationMetrics.setBleuScore(calculateBLEU(generatedAnswer, testCase.getExpectedAnswer()));
-                generationMetrics.setRougeScore(calculateROUGE(generatedAnswer, testCase.getExpectedAnswer()));
+                generationMetrics.setBleuScore(TextGenerationMetrics.bleu4(
+                        generatedAnswer, testCase.getExpectedAnswer()));
+                generationMetrics.setRougeScore(TextGenerationMetrics.rougeL(
+                        generatedAnswer, testCase.getExpectedAnswer()));
                 log.debug("LLM裁判打分: relevancy={}, correctness={}, faithfulness={}", scores[0], scores[1], scores[2]);
             } else {
+                if (options.isRequireLlm()) {
+                    throw new IllegalStateException("LLM裁判打分失败: " + testCase.getQuestion());
+                }
                 generationMetrics = evaluateGeneration(generatedAnswer, testCase.getExpectedAnswer(),
-                        retrievalResults, generationTime);
+                        retrievalResults, 0L);
             }
         } else {
             generationMetrics = evaluateGeneration(generatedAnswer, testCase.getExpectedAnswer(),
-                    retrievalResults, generationTime);
+                    retrievalResults, 0L);
         }
+        long generationTime = System.currentTimeMillis() - generationStart;
+        generationMetrics.setGenerationTime(generationTime);
         metrics.setGeneration(generationMetrics);
 
         // 步骤3: 整体评测
@@ -208,7 +288,14 @@ public class RagEvaluator {
 
         metrics.calculateOverallScore();
 
-        return metrics;
+        CaseEvaluation evaluation = new CaseEvaluation();
+        evaluation.setMetrics(metrics);
+        evaluation.setGeneratedAnswer(generatedAnswer);
+        evaluation.setRetrievedChunks(retrievalResults.stream()
+                .map(RetrievalResult::getChunkId)
+                .collect(Collectors.toList()));
+        evaluation.setLlmUsed(llmUsed);
+        return evaluation;
     }
 
     /**
@@ -223,7 +310,8 @@ public class RagEvaluator {
         metrics.setRetrievalTime(retrievalTime);
 
         if (relevantChunks == null || relevantChunks.isEmpty()) {
-            // 无标注数据，返回默认值
+            // 无相关性标注的用例不参与检索均值
+            metrics.setAnnotated(false);
             metrics.setRecall(0.0);
             metrics.setPrecision(0.0);
             metrics.setF1Score(0.0);
@@ -232,6 +320,7 @@ public class RagEvaluator {
             metrics.setHit(false);
             return metrics;
         }
+        metrics.setAnnotated(true);
 
         Set<String> relevantSet = new HashSet<>(relevantChunks);
         Set<String> retrievedSet = retrievalResults.stream()
@@ -310,9 +399,8 @@ public class RagEvaluator {
         double contextUtilization = calculateContextUtilization(generatedAnswer, retrievalResults);
         metrics.setContextUtilization(contextUtilization);
 
-        // BLEU和ROUGE（简化实现）
-        double bleuScore = calculateBLEU(generatedAnswer, expectedAnswer);
-        double rougeScore = calculateROUGE(generatedAnswer, expectedAnswer);
+        double bleuScore = TextGenerationMetrics.bleu4(generatedAnswer, expectedAnswer);
+        double rougeScore = TextGenerationMetrics.rougeL(generatedAnswer, expectedAnswer);
         metrics.setBleuScore(bleuScore);
         metrics.setRougeScore(rougeScore);
 
@@ -421,20 +509,6 @@ public class RagEvaluator {
     }
 
     /**
-     * 计算BLEU分数（简化实现）
-     */
-    private double calculateBLEU(String generated, String expected) {
-        return calculateTextSimilarity(generated, expected);
-    }
-
-    /**
-     * 计算ROUGE分数（简化实现）
-     */
-    private double calculateROUGE(String generated, String expected) {
-        return calculateTextSimilarity(generated, expected);
-    }
-
-    /**
      * 生成答案（模拟，实际需要调用LLM）
      */
     private String generateAnswer(List<RetrievalResult> retrievalResults, String question) {
@@ -470,19 +544,87 @@ public class RagEvaluator {
 
             // 解析relevant_chunks（JSON数组）
             String chunksJson = rs.getString("relevant_chunks");
-            if (chunksJson != null && !chunksJson.isEmpty()) {
-                // 简化实现：假设格式为 ["chunk_001", "chunk_002"]
-                chunksJson = chunksJson.replace("[", "").replace("]", "").replace("\"", "");
-                testCase.setRelevantChunks(Arrays.asList(chunksJson.split(",")));
-            } else {
-                testCase.setRelevantChunks(new ArrayList<>());
+            List<String> relevantChunks = new ArrayList<>();
+            if (chunksJson != null && !chunksJson.isBlank()) {
+                try {
+                    objectMapper.readTree(chunksJson).forEach(node -> {
+                        if (node.isTextual() && !node.asText().isBlank()) {
+                            relevantChunks.add(node.asText());
+                        }
+                    });
+                } catch (Exception e) {
+                    log.warn("解析relevant_chunks失败: {}", chunksJson);
+                }
             }
+            testCase.setRelevantChunks(relevantChunks);
 
             testCase.setDomain(rs.getString("domain"));
             testCase.setDifficulty(rs.getString("difficulty"));
 
             return testCase;
         }, merchantId);
+    }
+
+    private CaseEvaluationResult buildCaseResult(EvaluationCase testCase, CaseEvaluation evaluation) {
+        CaseEvaluationResult result = new CaseEvaluationResult();
+        result.setQuestion(testCase.getQuestion());
+        result.setExpectedAnswer(testCase.getExpectedAnswer());
+        result.setGeneratedAnswer(evaluation.getGeneratedAnswer());
+        result.setRelevantChunks(testCase.getRelevantChunks());
+        result.setRetrievedChunks(evaluation.getRetrievedChunks());
+        result.setLlmUsed(evaluation.isLlmUsed());
+        result.setRetrieval(evaluation.getMetrics().getRetrieval());
+        result.setGeneration(evaluation.getMetrics().getGeneration());
+        result.setOverall(evaluation.getMetrics().getOverall());
+        return result;
+    }
+
+    private void persistCaseResults(Long runId, Long merchantId, RagEvaluationReport report) {
+        if (report.getCaseResults() == null || report.getCaseResults().isEmpty()) {
+            return;
+        }
+        String sql = "INSERT INTO agent_rag_eval_case_result " +
+                "(run_id, merchant_id, question, expected_answer, generated_answer, " +
+                "retrieved_chunks, relevant_chunks, recall, precision_score, f1_score, mrr, ndcg, " +
+                "answer_relevancy, answer_correctness, faithfulness, bleu_score, rouge_l, " +
+                "retrieval_time, generation_time, llm_used) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        List<Object[]> rows = new ArrayList<>();
+        for (CaseEvaluationResult result : report.getCaseResults()) {
+            RagEvaluationMetrics.RetrievalMetrics retrieval = result.getRetrieval();
+            RagEvaluationMetrics.GenerationMetrics generation = result.getGeneration();
+            rows.add(new Object[]{
+                    runId,
+                    merchantId,
+                    result.getQuestion(),
+                    result.getExpectedAnswer(),
+                    result.getGeneratedAnswer(),
+                    toJsonArray(result.getRetrievedChunks()),
+                    toJsonArray(result.getRelevantChunks()),
+                    retrieval.getRecall(),
+                    retrieval.getPrecision(),
+                    retrieval.getF1Score(),
+                    retrieval.getMrr(),
+                    retrieval.getNdcg(),
+                    generation.getAnswerRelevancy(),
+                    generation.getAnswerCorrectness(),
+                    generation.getFaithfulness(),
+                    generation.getBleuScore(),
+                    generation.getRougeScore(),
+                    retrieval.getRetrievalTime(),
+                    generation.getGenerationTime(),
+                    result.isLlmUsed()
+            });
+        }
+        jdbcTemplate.batchUpdate(sql, rows);
+    }
+
+    private String toJsonArray(List<String> values) {
+        try {
+            return objectMapper.writeValueAsString(values == null ? List.of() : values);
+        } catch (Exception e) {
+            return "[]";
+        }
     }
 
     /**
@@ -500,28 +642,33 @@ public class RagEvaluator {
             return report;
         }
 
+        List<RagEvaluationMetrics> retrievalMetrics = metricsList.stream()
+                .filter(m -> m.getRetrieval() != null && m.getRetrieval().isAnnotated())
+                .collect(Collectors.toList());
+        report.setRetrievalCases(retrievalMetrics.size());
+
         // 计算平均值
-        double avgRecall = metricsList.stream()
+        double avgRecall = retrievalMetrics.stream()
                 .mapToDouble(m -> m.getRetrieval().getRecall())
                 .average()
                 .orElse(0.0);
 
-        double avgPrecision = metricsList.stream()
+        double avgPrecision = retrievalMetrics.stream()
                 .mapToDouble(m -> m.getRetrieval().getPrecision())
                 .average()
                 .orElse(0.0);
 
-        double avgF1 = metricsList.stream()
+        double avgF1 = retrievalMetrics.stream()
                 .mapToDouble(m -> m.getRetrieval().getF1Score())
                 .average()
                 .orElse(0.0);
 
-        double avgMRR = metricsList.stream()
+        double avgMRR = retrievalMetrics.stream()
                 .mapToDouble(m -> m.getRetrieval().getMrr())
                 .average()
                 .orElse(0.0);
 
-        double avgNDCG = metricsList.stream()
+        double avgNDCG = retrievalMetrics.stream()
                 .mapToDouble(m -> m.getRetrieval().getNdcg())
                 .average()
                 .orElse(0.0);
@@ -538,6 +685,16 @@ public class RagEvaluator {
 
         double avgFaithfulness = metricsList.stream()
                 .mapToDouble(m -> m.getGeneration().getFaithfulness())
+                .average()
+                .orElse(0.0);
+
+        double avgBleu = metricsList.stream()
+                .mapToDouble(m -> m.getGeneration().getBleuScore())
+                .average()
+                .orElse(0.0);
+
+        double avgRouge = metricsList.stream()
+                .mapToDouble(m -> m.getGeneration().getRougeScore())
                 .average()
                 .orElse(0.0);
 
@@ -564,6 +721,8 @@ public class RagEvaluator {
         report.setAvgAnswerRelevancy(avgAnswerRelevancy);
         report.setAvgAnswerCorrectness(avgAnswerCorrectness);
         report.setAvgFaithfulness(avgFaithfulness);
+        report.setAvgBleu(avgBleu);
+        report.setAvgRougeL(avgRouge);
         report.setAvgRetrievalTime(avgRetrievalTime);
         report.setAvgGenerationTime(avgGenerationTime);
         report.setAvgOverallScore(avgOverallScore);
@@ -584,15 +743,55 @@ public class RagEvaluator {
         private String difficulty;
     }
 
+    @Data
+    private static class CaseEvaluation {
+        private RagEvaluationMetrics metrics;
+        private String generatedAnswer;
+        private List<String> retrievedChunks;
+        private boolean llmUsed;
+    }
+
+    @Data
+    public static class EvaluationOptions {
+        /**
+         * true 时禁止启发式降级，任一LLM调用失败即终止评测。
+         */
+        private boolean requireLlm = false;
+
+        /**
+         * null或<=0表示评测全部用例。
+         */
+        private Integer maxCases;
+    }
+
+    @Data
+    public static class CaseEvaluationResult {
+        private String question;
+        private String expectedAnswer;
+        private String generatedAnswer;
+        private List<String> relevantChunks;
+        private List<String> retrievedChunks;
+        private boolean llmUsed;
+        private RagEvaluationMetrics.RetrievalMetrics retrieval;
+        private RagEvaluationMetrics.GenerationMetrics generation;
+        private RagEvaluationMetrics.OverallMetrics overall;
+    }
+
     /**
      * 评测报告
      */
     @Data
     public static class RagEvaluationReport {
+        private Long runId;
         private int totalCases;
         private int passedCases;
+        private int retrievalCases;
+        private int llmRatedCases;
+        private boolean llmUsed;
         private double passRate;
         private long totalTime;
+        private String evaluationMode;
+        private String modelName;
 
         // 检索指标
         private double avgRecall;
@@ -605,6 +804,8 @@ public class RagEvaluator {
         private double avgAnswerRelevancy;
         private double avgAnswerCorrectness;
         private double avgFaithfulness;
+        private double avgBleu;
+        private double avgRougeL;
 
         // 性能指标
         private long avgRetrievalTime;
@@ -612,5 +813,7 @@ public class RagEvaluator {
 
         // 综合评分
         private double avgOverallScore;
+
+        private List<CaseEvaluationResult> caseResults;
     }
 }

@@ -4,6 +4,30 @@
 
 ---
 
+## [RAG 真实 LLM 评测闭环] 2026-10-17
+
+**目标**：修复评测集 chunk 标注与真实知识库不一致、LLM 配置默认项缺失、答案生成/裁判只使用 Top-5 等评测偏差。
+
+### 变更
+
+- 新增 `V1_30_0__real_rag_evaluation.sql`：91 条评测用例对齐真实 `sop_*` chunk，8 条明确标记为知识库未覆盖；新增逐用例答案与指标明细表。
+- `RagEvaluator` 不再把启发式拼接当成真实生成；`LLM_STRICT` 模式下任一生成或裁判失败立即终止。
+- BLEU-4 与 ROUGE-L 改为标准算法，评测报告增加 `LLM/HEURISTIC` 模式、模型名、BLEU/ROUGE 和逐用例明细。
+- 生成与裁判上下文数量与评测 Top-K 对齐，可通过 `agent.evaluation.context-limit` 配置。
+- `AiConfigServiceImpl.getDefaultConfig()` 在无默认项时回退到首个启用配置。
+- 新增 `llm` 测试标签和 `rag-llm-eval` Maven profile，避免日常 CI 产生外部模型费用。
+
+### 真实跑批
+
+- 99 条用例全部完成真实生成与裁判，`runId=30`，模型 `deepseek-v4-flash`。
+- Recall@10 `0.8626`、MRR `0.7210`、NDCG@10 `0.7420`。
+- Answer Relevancy `0.7870`、Correctness `0.6108`、Faithfulness `0.9446`。
+- BLEU-4 `0.1254`、ROUGE-L `0.2467`、通过率 `58.59%`。
+
+详细报告见 [RAG-真实评测报告.md](RAG-真实评测报告.md)。
+
+---
+
 ## [凭据轮换：MySQL / PostgreSQL / Redis / JWT / 开放平台] 2026-10-17
 
 **目标**：把 A 类（本机可操作）的泄露凭据全部轮换，旧值作废。

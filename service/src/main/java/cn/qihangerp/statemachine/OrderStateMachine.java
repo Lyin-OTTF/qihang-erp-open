@@ -52,12 +52,13 @@ public class OrderStateMachine {
     private static final Map<Integer, Set<Integer>> TRANSITIONS = new HashMap<>();
 
     static {
-        addTransition(0, 21, 1, 11);
+        addTransition(0, 21, 1, 11, 12);
         addTransition(21, 1, 11, 13);
         addTransition(1, 2, 101, 11, 12);
         addTransition(101, 2, 12);
         addTransition(2, 3, 12);
-        addTransition(12, 3, 13, 11);
+        addTransition(3, 12);
+        addTransition(12, 3, 13, 11, 1, 2);
         addTransition(22, 1, 11);
     }
 

@@ -205,4 +205,40 @@ class ApprovalServiceTest {
         List<ApprovalRequest> list = approvalService.listByTraceId(traceId);
         assertEquals(2, list.size(), "同一traceId应有2条审批记录");
     }
+
+    @Test
+    void tenantScope_blocksCrossTenantReadAndApprove() {
+        String traceId = TEST_TRACE + "-11";
+        Long tenant1Approval = approvalService.createApproval(
+                traceId, "toolA", "desc", 1L, 100L, new Object[]{"A"});
+        Long tenant2Approval = approvalService.createApproval(
+                traceId, "toolB", "desc", 2L, 200L, new Object[]{"B"});
+
+        List<ApprovalRequest> tenant1List = approvalService.listByTraceId(traceId, 1L);
+        assertEquals(1, tenant1List.size());
+        assertEquals(tenant1Approval, tenant1List.get(0).getId());
+        assertNull(approvalService.getById(tenant2Approval, 1L));
+        assertFalse(approvalService.approve(tenant2Approval, 1L, 999L, "越权批准"));
+        assertEquals("PENDING", approvalService.getById(tenant2Approval).getStatus());
+
+        assertTrue(approvalService.approve(tenant1Approval, 1L, 999L, "本租户批准"));
+    }
+
+    @Test
+    void claimApproved_isSingleUseAndMatchesArguments() {
+        String traceId = TEST_TRACE + "-12";
+        Object[] approvedArgs = new Object[]{100L, 200L};
+        Long approvalId = approvalService.createApproval(
+                traceId, "workflowTool", "desc", 1L, 100L, approvedArgs);
+        approvalService.approve(approvalId, 1L, 999L, "同意");
+
+        assertFalse(approvalService.claimApproved(
+                approvalId, "workflowTool", 1L, new Object[]{100L, 201L}),
+                "参数不一致不能领取审批单");
+        assertTrue(approvalService.claimApproved(
+                approvalId, "workflowTool", 1L, approvedArgs));
+        assertFalse(approvalService.claimApproved(
+                approvalId, "workflowTool", 1L, approvedArgs),
+                "同一审批单不能被重复领取");
+    }
 }

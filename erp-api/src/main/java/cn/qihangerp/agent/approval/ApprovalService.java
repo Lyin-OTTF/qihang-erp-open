@@ -50,8 +50,11 @@ public class ApprovalService {
         LambdaQueryWrapper<ApprovalRequest> dupWrapper = new LambdaQueryWrapper<>();
         dupWrapper.eq(ApprovalRequest::getTraceId, traceId)
                 .eq(ApprovalRequest::getToolName, toolName)
-                .eq(ApprovalRequest::getStatus, ApprovalRequest.Status.PENDING.name())
-                .last("LIMIT 1");
+                .eq(ApprovalRequest::getStatus, ApprovalRequest.Status.PENDING.name());
+        if (merchantId != null) {
+            dupWrapper.eq(ApprovalRequest::getMerchantId, merchantId);
+        }
+        dupWrapper.last("LIMIT 1");
         ApprovalRequest existing = approvalMapper.selectOne(dupWrapper);
         if (existing != null) {
             log.info("审批已存在（去重跳过）: id={}, tool={}, traceId={}", existing.getId(), toolName, traceId);
@@ -83,6 +86,16 @@ public class ApprovalService {
      */
     @Transactional
     public boolean approve(Long approvalId, Long approverId, String comment) {
+        return approve(approvalId, null, approverId, comment);
+    }
+
+    /**
+     * 批准审批，并在指定租户范围内做条件更新。
+     *
+     * @param merchantId 当前登录用户可访问的租户；平台管理员传 null
+     */
+    @Transactional
+    public boolean approve(Long approvalId, Long merchantId, Long approverId, String comment) {
         // 条件更新：仅当状态为 PENDING 时才更新为 APPROVED，防止并发审批覆盖
         LambdaUpdateWrapper<ApprovalRequest> wrapper = new LambdaUpdateWrapper<>();
         wrapper.eq(ApprovalRequest::getId, approvalId)
@@ -91,6 +104,9 @@ public class ApprovalService {
                 .set(ApprovalRequest::getApproverId, approverId)
                 .set(ApprovalRequest::getApproveComment, comment)
                 .set(ApprovalRequest::getApprovedAt, LocalDateTime.now());
+        if (merchantId != null) {
+            wrapper.eq(ApprovalRequest::getMerchantId, merchantId);
+        }
         int updated = approvalMapper.update(null, wrapper);
         if (updated == 0) {
             log.warn("审批不存在或状态非PENDING: id={}", approvalId);
@@ -137,6 +153,16 @@ public class ApprovalService {
      */
     @Transactional
     public boolean reject(Long approvalId, Long approverId, String comment) {
+        return reject(approvalId, null, approverId, comment);
+    }
+
+    /**
+     * 拒绝审批，并在指定租户范围内做条件更新。
+     *
+     * @param merchantId 当前登录用户可访问的租户；平台管理员传 null
+     */
+    @Transactional
+    public boolean reject(Long approvalId, Long merchantId, Long approverId, String comment) {
         LambdaUpdateWrapper<ApprovalRequest> wrapper = new LambdaUpdateWrapper<>();
         wrapper.eq(ApprovalRequest::getId, approvalId)
                 .eq(ApprovalRequest::getStatus, ApprovalRequest.Status.PENDING.name())
@@ -144,6 +170,9 @@ public class ApprovalService {
                 .set(ApprovalRequest::getApproverId, approverId)
                 .set(ApprovalRequest::getApproveComment, comment)
                 .set(ApprovalRequest::getApprovedAt, LocalDateTime.now());
+        if (merchantId != null) {
+            wrapper.eq(ApprovalRequest::getMerchantId, merchantId);
+        }
         int updated = approvalMapper.update(null, wrapper);
         if (updated == 0) {
             log.warn("审批拒绝失败（状态非PENDING）: id={}", approvalId);
@@ -200,11 +229,23 @@ public class ApprovalService {
     }
 
     /**
+     * 检查审批是否已批准，并限定审批单所属租户。
+     */
+    public boolean isApproved(String traceId, String toolName, Long merchantId, Object[] args) {
+        return findApproved(traceId, toolName, merchantId, args) != null;
+    }
+
+    /**
      * 按 traceId + toolName 查询"仍有效且参数匹配"的已批准记录。
      * isApproved 与 getApprovedApproval 共用同一套过滤条件，
      * 避免"判定用参数比对、回写却取到另一条审批"的不一致。
      */
     private ApprovalRequest findApproved(String traceId, String toolName, Object[] args) {
+        return findApproved(traceId, toolName, null, args);
+    }
+
+    private ApprovalRequest findApproved(String traceId, String toolName,
+                                         Long merchantId, Object[] args) {
         LambdaQueryWrapper<ApprovalRequest> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ApprovalRequest::getTraceId, traceId)
                 .eq(ApprovalRequest::getToolName, toolName)
@@ -212,23 +253,16 @@ public class ApprovalService {
                 .gt(ApprovalRequest::getExpiresAt, LocalDateTime.now())
                 .orderByDesc(ApprovalRequest::getCreatedAt)
                 .last("LIMIT 1");
+        if (merchantId != null) {
+            wrapper.eq(ApprovalRequest::getMerchantId, merchantId);
+        }
         ApprovalRequest approval = approvalMapper.selectOne(wrapper);
         if (approval == null) {
             return null;
         }
-        // 参数摘要匹配：如果当前调用带了 args，且审批记录里存了 inputParams，则比对
-        if (args != null && args.length > 0 && approval.getInputParams() != null) {
-            try {
-                String currentArgsJson = objectMapper.writeValueAsString(args);
-                if (!currentArgsJson.equals(approval.getInputParams())) {
-                    log.info("审批参数不匹配，需重新审批: tool={}, traceId={}, 已批准参数={}, 当前参数={}",
-                            toolName, traceId, approval.getInputParams(), currentArgsJson);
-                    return null;
-                }
-            } catch (JsonProcessingException e) {
-                log.warn("参数摘要比对失败，保守起见要求重新审批: {}", e.getMessage());
-                return null;
-            }
+        if (!matchesArgs(approval, args)) {
+            log.info("审批参数不匹配，需重新审批: tool={}, traceId={}", toolName, traceId);
+            return null;
         }
         return approval;
     }
@@ -241,9 +275,81 @@ public class ApprovalService {
         return findApproved(traceId, toolName, args);
     }
 
+    /**
+     * 获取已批准审批记录，并限定审批单所属租户。
+     */
+    public ApprovalRequest getApprovedApproval(String traceId, String toolName,
+                                               Long merchantId, Object[] args) {
+        return findApproved(traceId, toolName, merchantId, args);
+    }
+
     /** 兼容旧调用：不校验参数，仅按 traceId + toolName + 未过期查询。 */
     public ApprovalRequest getApprovedApproval(String traceId, String toolName) {
         return findApproved(traceId, toolName, null);
+    }
+
+    /**
+     * 按审批单ID获取仍有效、租户匹配且参数一致的已批准记录。
+     */
+    public ApprovalRequest getApprovedApproval(Long approvalId, String toolName,
+                                               Long merchantId, Object[] args) {
+        if (approvalId == null || toolName == null) {
+            return null;
+        }
+        LambdaQueryWrapper<ApprovalRequest> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ApprovalRequest::getId, approvalId)
+                .eq(ApprovalRequest::getToolName, toolName)
+                .eq(ApprovalRequest::getStatus, ApprovalRequest.Status.APPROVED.name())
+                .gt(ApprovalRequest::getExpiresAt, LocalDateTime.now());
+        if (merchantId != null) {
+            wrapper.eq(ApprovalRequest::getMerchantId, merchantId);
+        }
+        ApprovalRequest approval = approvalMapper.selectOne(wrapper);
+        if (approval == null || !matchesArgs(approval, args)) {
+            return null;
+        }
+        return approval;
+    }
+
+    /**
+     * 原子领取已批准审批单，保证同一审批不会被并发执行多次。
+     */
+    @Transactional
+    public boolean claimApproved(Long approvalId, String toolName,
+                                 Long merchantId, Object[] args) {
+        ApprovalRequest approval = getApprovedApproval(approvalId, toolName, merchantId, args);
+        if (approval == null) {
+            return false;
+        }
+        LambdaUpdateWrapper<ApprovalRequest> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(ApprovalRequest::getId, approvalId)
+                .eq(ApprovalRequest::getStatus, ApprovalRequest.Status.APPROVED.name())
+                .gt(ApprovalRequest::getExpiresAt, LocalDateTime.now())
+                .set(ApprovalRequest::getStatus, ApprovalRequest.Status.EXECUTED.name())
+                .set(ApprovalRequest::getExecutedAt, LocalDateTime.now())
+                .set(ApprovalRequest::getExecutionResult, "执行中");
+        if (merchantId != null) {
+            wrapper.eq(ApprovalRequest::getMerchantId, merchantId);
+        }
+        int updated = approvalMapper.update(null, wrapper);
+        if (updated == 0) {
+            log.warn("审批单已被其他请求领取或已过期: id={}", approvalId);
+            return false;
+        }
+        return true;
+    }
+
+    private boolean matchesArgs(ApprovalRequest approval, Object[] args) {
+        if (args == null || args.length == 0 || approval.getInputParams() == null) {
+            return true;
+        }
+        try {
+            String currentArgsJson = objectMapper.writeValueAsString(args);
+            return currentArgsJson.equals(approval.getInputParams());
+        } catch (JsonProcessingException e) {
+            log.warn("参数摘要比对失败，保守起见要求重新审批: {}", e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -263,9 +369,19 @@ public class ApprovalService {
      * 按 traceId 查询审批记录。
      */
     public List<ApprovalRequest> listByTraceId(String traceId) {
+        return listByTraceId(traceId, null);
+    }
+
+    /**
+     * 按 traceId 查询审批记录，并限定租户范围。
+     */
+    public List<ApprovalRequest> listByTraceId(String traceId, Long merchantId) {
         LambdaQueryWrapper<ApprovalRequest> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ApprovalRequest::getTraceId, traceId)
                 .orderByDesc(ApprovalRequest::getCreatedAt);
+        if (merchantId != null) {
+            wrapper.eq(ApprovalRequest::getMerchantId, merchantId);
+        }
         return approvalMapper.selectList(wrapper);
     }
 
@@ -274,6 +390,18 @@ public class ApprovalService {
      */
     public ApprovalRequest getById(Long id) {
         return approvalMapper.selectById(id);
+    }
+
+    /**
+     * 按 ID 查询审批记录，并限定租户范围。
+     */
+    public ApprovalRequest getById(Long id, Long merchantId) {
+        LambdaQueryWrapper<ApprovalRequest> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ApprovalRequest::getId, id);
+        if (merchantId != null) {
+            wrapper.eq(ApprovalRequest::getMerchantId, merchantId);
+        }
+        return approvalMapper.selectOne(wrapper);
     }
 
     /**

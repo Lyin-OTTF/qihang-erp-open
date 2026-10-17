@@ -43,20 +43,36 @@ public class LlmEvaluationService {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Pattern jsonPattern = Pattern.compile("\\{[\\s\\S]*\\}");
 
-    @Value("${agent.evaluation.llm-enabled:false}")
-    private boolean llmEnabled;
-
-    @Value("${agent.evaluation.llm-timeout-seconds:60}")
-    private int timeoutSeconds;
+    private final boolean llmEnabled;
+    private final int timeoutSeconds;
+    private final int contextLimit;
 
     private volatile ChatClient cachedChatClient;
+    private volatile String cachedModelName;
 
-    public LlmEvaluationService(AiConfigService aiConfigService) {
+    public LlmEvaluationService(AiConfigService aiConfigService,
+                                @Value("${agent.evaluation.llm-enabled:false}") boolean llmEnabled,
+                                @Value("${agent.evaluation.llm-timeout-seconds:60}") int timeoutSeconds,
+                                @Value("${agent.evaluation.context-limit:10}") int contextLimit) {
         this.aiConfigService = aiConfigService;
+        this.llmEnabled = llmEnabled;
+        this.timeoutSeconds = timeoutSeconds;
+        this.contextLimit = Math.max(1, contextLimit);
     }
 
     public boolean isLlmEnabled() {
         return llmEnabled;
+    }
+
+    /**
+     * 返回当前评测使用的模型名称。
+     */
+    public String getModelName() {
+        if (!llmEnabled) {
+            return "heuristic";
+        }
+        getChatClient();
+        return cachedModelName;
     }
 
     /**
@@ -67,7 +83,7 @@ public class LlmEvaluationService {
         try {
             ChatClient client = getChatClient();
             StringBuilder contextStr = new StringBuilder();
-            int limit = Math.min(5, context.size());
+            int limit = Math.min(contextLimit, context.size());
             for (int i = 0; i < limit; i++) {
                 contextStr.append("[").append(i + 1).append("] ")
                         .append(context.get(i).getContent()).append("\n");
@@ -95,7 +111,7 @@ public class LlmEvaluationService {
         try {
             ChatClient client = getChatClient();
             StringBuilder contextStr = new StringBuilder();
-            int limit = Math.min(5, context.size());
+            int limit = Math.min(contextLimit, context.size());
             for (int i = 0; i < limit; i++) {
                 contextStr.append("[").append(i + 1).append("] ")
                         .append(context.get(i).getContent()).append("\n");
@@ -178,6 +194,7 @@ public class LlmEvaluationService {
                             .build())
                     .build();
             cachedChatClient = ChatClient.builder(chatModel).build();
+            cachedModelName = config.getModelName();
             log.info("LLM评测客户端已构建: model={}, endpoint={}", config.getModelName(), baseUrl);
             return cachedChatClient;
         }

@@ -19,7 +19,7 @@ import java.time.LocalDateTime;
 /**
  * 主系统商品库存 Service 实现
  *
- * <p>库存扣减采用原子条件更新（UPDATE ... WHERE quantity >= ?），
+ * <p>库存扣减采用原子条件更新（UPDATE ... WHERE quantity/available_quantity >= ?），
  * 消除"先查后写"的竞态窗口，从根本上防止超卖。
  * 扣减与流水记录在同一事务内，失败整体回滚。</p>
  *
@@ -65,7 +65,7 @@ public class OGoodsInventoryServiceImpl
         if (inventoryId == null || quantity == null || quantity <= 0) {
             return false;
         }
-        // 原子条件更新：仅当 quantity >= 扣减量时才执行
+        // 原子条件更新：总库存和可用库存都充足时才执行
         int affected = baseMapper.deductStockAtomic(inventoryId, quantity);
         if (affected == 0) {
             return false; // 库存不足或不存在
@@ -98,26 +98,21 @@ public class OGoodsInventoryServiceImpl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean lockStock(Long inventoryId, Integer quantity) {
-        if (inventoryId == null || quantity == null) {
+        if (inventoryId == null || quantity == null || quantity == 0) {
             return false;
         }
-        OGoodsInventory inv = this.getById(inventoryId);
-        if (inv == null) return false;
-        // 解锁（负数）不能超过已锁定量
-        if (quantity < 0 && inv.getLockedQuantity() < -quantity) return false;
-        // 锁定（正数）不能超过可用量
-        if (quantity > 0 && inv.getAvailableQuantity() < quantity) return false;
-
-        OGoodsInventory update = new OGoodsInventory();
-        update.setId(inventoryId);
-        update.setLockedQuantity(inv.getLockedQuantity() + quantity);
-        update.setAvailableQuantity(inv.getAvailableQuantity() - quantity);
-        boolean ok = this.updateById(update);
-        if (ok) {
+        int affected = quantity > 0
+                ? baseMapper.lockStockAtomic(inventoryId, quantity)
+                : baseMapper.unlockStockAtomic(inventoryId, Math.abs(quantity));
+        if (affected > 0) {
+            OGoodsInventory inv = this.getById(inventoryId);
             int opType = quantity > 0 ? 3 : 4;
-            writeOperation(inv, Math.abs(quantity), opType, quantity > 0 ? "锁定库存" : "解锁库存");
+            if (inv != null) {
+                writeOperation(inv, Math.abs(quantity), opType, quantity > 0 ? "锁定库存" : "解锁库存");
+            }
+            return true;
         }
-        return ok;
+        return false;
     }
 
     /**

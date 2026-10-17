@@ -54,7 +54,8 @@ public class ApprovalController {
      */
     @GetMapping("/trace/{traceId}")
     public Map<String, Object> listByTraceId(@PathVariable String traceId) {
-        List<ApprovalRequest> list = approvalService.listByTraceId(traceId);
+        Long effectiveTenant = tenantAuthorizer.authorize(null);
+        List<ApprovalRequest> list = approvalService.listByTraceId(traceId, effectiveTenant);
         Map<String, Object> resp = new HashMap<>();
         resp.put("code", 200);
         resp.put("data", list);
@@ -67,8 +68,9 @@ public class ApprovalController {
     @PostMapping("/{id}/approve")
     public Map<String, Object> approve(@PathVariable Long id,
                                        @RequestParam(required = false) String comment) {
+        Long effectiveTenant = tenantAuthorizer.authorize(null);
         Long approverId = cn.qihangerp.security.common.SecurityUtils.getUserId();
-        boolean success = approvalService.approve(id, approverId, comment);
+        boolean success = approvalService.approve(id, effectiveTenant, approverId, comment);
         Map<String, Object> resp = new HashMap<>();
         resp.put("code", success ? 200 : 400);
         resp.put("msg", success ? "审批通过" : "审批失败（状态不允许或不存在）");
@@ -81,8 +83,9 @@ public class ApprovalController {
     @PostMapping("/{id}/reject")
     public Map<String, Object> reject(@PathVariable Long id,
                                       @RequestParam(required = false) String comment) {
+        Long effectiveTenant = tenantAuthorizer.authorize(null);
         Long approverId = cn.qihangerp.security.common.SecurityUtils.getUserId();
-        boolean success = approvalService.reject(id, approverId, comment);
+        boolean success = approvalService.reject(id, effectiveTenant, approverId, comment);
         Map<String, Object> resp = new HashMap<>();
         resp.put("code", success ? 200 : 400);
         resp.put("msg", success ? "已拒绝" : "操作失败（状态不允许或不存在）");
@@ -94,7 +97,8 @@ public class ApprovalController {
      */
     @GetMapping("/{id}")
     public Map<String, Object> getById(@PathVariable Long id) {
-        ApprovalRequest approval = approvalService.getById(id);
+        Long effectiveTenant = tenantAuthorizer.authorize(null);
+        ApprovalRequest approval = approvalService.getById(id, effectiveTenant);
         Map<String, Object> resp = new HashMap<>();
         if (approval != null) {
             resp.put("code", 200);

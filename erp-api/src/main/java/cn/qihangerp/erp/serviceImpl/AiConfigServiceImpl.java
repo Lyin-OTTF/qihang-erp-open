@@ -14,9 +14,21 @@ public class AiConfigServiceImpl extends ServiceImpl<AiConfigMapper, AiConfig> i
 
     @Override
     public AiConfig getDefaultConfig() {
-        return lambdaQuery()
+        AiConfig config = lambdaQuery()
                 .eq(AiConfig::getIsDefault, 1)
                 .eq(AiConfig::getIsEnabled, 1)
+                .orderByAsc(AiConfig::getSortOrder)
+                .orderByAsc(AiConfig::getId)
+                .last("LIMIT 1")
+                .one();
+        if (config != null) {
+            return config;
+        }
+        return lambdaQuery()
+                .eq(AiConfig::getIsEnabled, 1)
+                .orderByAsc(AiConfig::getSortOrder)
+                .orderByAsc(AiConfig::getId)
+                .last("LIMIT 1")
                 .one();
     }
 

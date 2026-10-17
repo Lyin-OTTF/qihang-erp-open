@@ -157,6 +157,7 @@ class AgentWorkflowIntegrationTest {
         ShopRefund refundAfter = refundMapper.selectById(refundId);
         assertNotNull(refundAfter);
         assertEquals(3, refundAfter.getStatus(), "退款状态应更新为3(退款中)");
+        assertEquals(12, orderAfter.getOrderStatus(), "订单应进入12(退款中)");
 
         // 验证Checkpoint已保存
         Integer checkpointCount = jdbcTemplate.queryForObject(
@@ -214,6 +215,9 @@ class AgentWorkflowIntegrationTest {
         assertNotNull(status);
         assertTrue(status.isSuccess());
         assertNotNull(status.getSummary());
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> workflowService.getWorkflowStatus(result.getExecutionId(), 2L),
+                "禁止跨租户查询工作流状态");
 
         // 验证快照中包含节点状态信息
         Integer version = jdbcTemplate.queryForObject(
@@ -241,5 +245,77 @@ class AgentWorkflowIntegrationTest {
         // 工作流包含DB查询和更新，正常应在5秒内完成
         // （这里不做严格时间断言，因为DB性能波动大，主要验证功能正确）
         assertTrue(elapsed < 30000, "工作流应在30秒内完成，实际: " + elapsed + "ms");
+    }
+
+    /**
+     * 新订单(0) + 新售后单(0) 应通过 0→2→3 的分步状态迁移完成工作流。
+     */
+    @Test
+    void testNewOrderAndNewRefundCanBeProcessed() {
+        String memo = "WF-TEST-NEW-" + System.currentTimeMillis();
+        Long orderId = insertTestOrder(0, memo);
+        Long refundId = insertTestRefund(orderId, 0);
+
+        WorkflowResult result = workflowService.executeAfterSalesWorkflow(orderId, refundId, 1L);
+
+        assertTrue(result.isSuccess(), "新订单/新售后单应可处理: " + result.getSummary());
+        assertEquals(12, orderMapper.selectById(orderId).getOrderStatus());
+        assertEquals(3, refundMapper.selectById(refundId).getStatus());
+    }
+
+    /**
+     * 待付款订单未实际支付，不应直接进入退款中。
+     */
+    @Test
+    void testPendingPaymentOrderCannotEnterRefundWorkflow() {
+        String memo = "WF-TEST-UNPAID-" + System.currentTimeMillis();
+        Long orderId = insertTestOrder(21, memo);
+        Long refundId = insertTestRefund(orderId, 2);
+
+        WorkflowResult result = workflowService.executeAfterSalesWorkflow(orderId, refundId, 1L);
+
+        assertFalse(result.isSuccess(), "待付款订单不应直接进入退款流程");
+        assertEquals(NodeStatus.FAILED, result.getNodeStatuses().get("validate_transition"));
+        assertEquals(21, orderMapper.selectById(orderId).getOrderStatus());
+        assertEquals(2, refundMapper.selectById(refundId).getStatus());
+    }
+
+    /**
+     * Checkpoint 必须绑定原始 approvalId，恢复时不能换用其他审批单。
+     */
+    @Test
+    void testResumeRequiresBoundApproval() {
+        String memo = "WF-TEST-RESUME-" + System.currentTimeMillis();
+        Long orderId = insertTestOrder(2, memo);
+        Long refundId = insertTestRefund(orderId, 2);
+        Long approvalId = 987654L;
+
+        WorkflowResult result = workflowService.executeAfterSalesWorkflow(
+                orderId, refundId, 1L, approvalId);
+        assertTrue(result.isSuccess());
+
+        assertThrows(org.springframework.security.access.AccessDeniedException.class,
+                () -> workflowService.resumeWorkflow(result.getExecutionId(), 1L, 987655L));
+        assertTrue(workflowService.resumeWorkflow(
+                result.getExecutionId(), 1L, approvalId).isSuccess());
+    }
+
+    /**
+     * 同一租户内的售后单也必须与订单存在关联，不能交叉拼接执行。
+     */
+    @Test
+    void testRefundMustBelongToOrder() {
+        String memoA = "WF-TEST-LINK-A-" + System.currentTimeMillis();
+        String memoB = "WF-TEST-LINK-B-" + System.currentTimeMillis();
+        Long orderA = insertTestOrder(2, memoA);
+        Long orderB = insertTestOrder(2, memoB);
+        Long refundB = insertTestRefund(orderB, 2);
+
+        WorkflowResult result = workflowService.executeAfterSalesWorkflow(orderA, refundB, 1L);
+
+        assertFalse(result.isSuccess());
+        assertEquals(NodeStatus.FAILED, result.getNodeStatuses().get("validate_transition"));
+        assertEquals(2, orderMapper.selectById(orderA).getOrderStatus());
+        assertEquals(2, refundMapper.selectById(refundB).getStatus());
     }
 }

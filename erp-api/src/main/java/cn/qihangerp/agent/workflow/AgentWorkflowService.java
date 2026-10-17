@@ -19,6 +19,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -53,6 +54,7 @@ import java.util.UUID;
 public class AgentWorkflowService {
 
     public static final String WORKFLOW_AFTER_SALES = "order-aftersales";
+    public static final String WORKFLOW_APPROVAL_TOOL = "workflow." + WORKFLOW_AFTER_SALES;
 
     private final ShopOrderMapper shopOrderMapper;
     private final ShopRefundMapper shopRefundMapper;
@@ -103,11 +105,25 @@ public class AgentWorkflowService {
      * @return 工作流执行结果
      */
     public WorkflowResult executeAfterSalesWorkflow(Long orderId, Long refundId, Long merchantId) {
+        return executeAfterSalesWorkflow(orderId, refundId, merchantId, null);
+    }
+
+    /**
+     * 执行订单售后处理工作流，并绑定触发本次执行的审批单。
+     */
+    public WorkflowResult executeAfterSalesWorkflow(Long orderId, Long refundId,
+                                                    Long merchantId, Long approvalId) {
+        if (merchantId == null) {
+            throw new AccessDeniedException("工作流执行缺少租户上下文");
+        }
         String executionId = WORKFLOW_AFTER_SALES + "-" + UUID.randomUUID();
         ExecutionContext context = new ExecutionContext(WORKFLOW_AFTER_SALES, executionId);
         context.put("orderId", orderId);
         context.put("refundId", refundId);
         context.put("merchantId", merchantId);
+        if (approvalId != null) {
+            context.put("approvalId", approvalId);
+        }
 
         log.info("工作流启动: workflow={}, execution={}, orderId={}, refundId={}",
                 WORKFLOW_AFTER_SALES, executionId, orderId, refundId);
@@ -144,10 +160,26 @@ public class AgentWorkflowService {
      * @return 工作流执行结果
      */
     public WorkflowResult resumeWorkflow(String executionId) {
+        return resumeWorkflow(executionId, null);
+    }
+
+    /**
+     * 从Checkpoint快照恢复工作流执行，并校验执行快照所属租户。
+     */
+    public WorkflowResult resumeWorkflow(String executionId, Long merchantId) {
+        return resumeWorkflow(executionId, merchantId, null);
+    }
+
+    /**
+     * 从Checkpoint恢复工作流，并校验执行快照与审批单绑定关系。
+     */
+    public WorkflowResult resumeWorkflow(String executionId, Long merchantId, Long approvalId) {
         ExecutionContext context = loadFromCheckpoint(executionId);
         if (context == null) {
             throw new IllegalArgumentException("未找到执行快照: " + executionId);
         }
+        assertWorkflowTenant(context, merchantId);
+        assertWorkflowApproval(context, approvalId);
 
         log.info("工作流恢复: execution={}, 已完成节点={}",
                 executionId, countStatus(context, NodeStatus.SUCCESS));
@@ -163,11 +195,19 @@ public class AgentWorkflowService {
      * 查询工作流执行状态。
      */
     public WorkflowResult getWorkflowStatus(String executionId) {
-        GraphState state = checkpointManager.loadLatest(executionId);
-        if (state == null) {
+        return getWorkflowStatus(executionId, null);
+    }
+
+    /**
+     * 查询工作流执行状态，并校验执行快照所属租户。
+     */
+    public WorkflowResult getWorkflowStatus(String executionId, Long merchantId) {
+        ExecutionContext context = loadFromCheckpoint(executionId);
+        if (context == null) {
             throw new IllegalArgumentException("未找到执行快照: " + executionId);
         }
-        return new WorkflowResult(executionId, state);
+        assertWorkflowTenant(context, merchantId);
+        return new WorkflowResult(executionId, context);
     }
 
     // ==================== 工作流节点定义 ====================
@@ -191,6 +231,10 @@ public class AgentWorkflowService {
                         throw new RuntimeException("订单不存在或不属于当前租户: orderId=" + orderId);
                     }
                     ctx.put("currentOrderStatus", order.getOrderStatus());
+                    ctx.put("currentOrderVersion", order.getVersion());
+                    if (order.getOrderId() != null) {
+                        ctx.put("currentOrderNumber", order.getOrderId());
+                    }
                     try {
                         return objectMapper.writeValueAsString(order);
                     } catch (Exception e) {
@@ -216,6 +260,13 @@ public class AgentWorkflowService {
                     }
                     ctx.put("currentRefundStatus", refund.getStatus());
                     ctx.put("originalRefundStatus", refund.getStatus());
+                    ctx.put("currentRefundVersion", refund.getVersion());
+                    if (refund.getShopOrderId() != null) {
+                        ctx.put("refundShopOrderId", refund.getShopOrderId());
+                    }
+                    if (refund.getOrderId() != null) {
+                        ctx.put("refundOrderNumber", refund.getOrderId());
+                    }
                     try {
                         return objectMapper.writeValueAsString(refund);
                     } catch (Exception e) {
@@ -246,12 +297,17 @@ public class AgentWorkflowService {
                     if (currentStatus == null) {
                         throw new RuntimeException("无法获取订单当前状态");
                     }
-                    // 目标状态：3(已完成) — 售后处理完成后订单完成
+                    Long linkedOrderId = ctx.get("refundShopOrderId", Long.class);
+                    if (linkedOrderId != null && !orderId.equals(linkedOrderId)) {
+                        throw new RuntimeException("售后单不属于当前订单: orderId=" + orderId
+                                + ", refundLinkedOrderId=" + linkedOrderId);
+                    }
+                    // 售后处理启动后订单进入12(退款中)，退款完成后由后续流程关闭订单
                     try {
                         transitionValidator.validateOrderTransition(
-                                currentStatus, 3, String.valueOf(orderId));
+                                currentStatus, 12, String.valueOf(orderId));
                     } catch (Exception e) {
-                        throw new RuntimeException("状态迁移不合法: 当前状态" + currentStatus + " → 3, " + e.getMessage());
+                        throw new RuntimeException("状态迁移不合法: 当前状态" + currentStatus + " → 12, " + e.getMessage());
                     }
                     ctx.put("transitionValid", true);
                     return "valid";
@@ -259,7 +315,7 @@ public class AgentWorkflowService {
                 .build());
 
         // 5. 执行退款处理（依赖4，写操作带补偿，状态机校验+租户过滤）
-        // 同时更新售后单状态和订单状态（售后处理完成后订单变为已完成）
+        // 同时更新售后单状态和订单状态（订单进入退款中）
         nodes.add(DAGNode.builder("process_refund")
                 .name("执行退款处理")
                 .dependsOn("validate_transition")
@@ -269,38 +325,77 @@ public class AgentWorkflowService {
                     Long merchantId = ctx.get("merchantId", Long.class);
                     Integer originalRefundStatus = ctx.get("originalRefundStatus", Integer.class);
                     Integer originalOrderStatus = ctx.get("currentOrderStatus", Integer.class);
+                    Integer orderVersion = loadOrderVersion(orderId, merchantId);
+                    Integer refundVersion = loadRefundVersion(refundId, merchantId);
 
                     // 状态机校验：当前售后状态 → 3(退款中)
                     if (originalRefundStatus == null) {
                         throw new RuntimeException("无法获取售后单当前状态，refundId=" + refundId);
                     }
-                    transitionValidator.validateRefundTransition(
-                            originalRefundStatus, 3, String.valueOf(refundId));
-
-                    // 更新售后单状态为3(退款中)
-                    LambdaUpdateWrapper<ShopRefund> refundWrapper = new LambdaUpdateWrapper<>();
-                    refundWrapper.eq(ShopRefund::getId, refundId);
-                    if (merchantId != null) {
-                        refundWrapper.eq(ShopRefund::getMerchantId, merchantId);
-                    }
-                    refundWrapper.set(ShopRefund::getStatus, 3);
-                    shopRefundMapper.update(null, refundWrapper);
-                    ctx.put("refundUpdated", true);
-
-                    // 同步更新订单状态为3(已完成) — 修复：之前只校验不更新
-                    if (originalOrderStatus != null) {
-                        LambdaUpdateWrapper<ShopOrder> orderWrapper = new LambdaUpdateWrapper<>();
-                        orderWrapper.eq(ShopOrder::getId, orderId);
-                        if (merchantId != null) {
-                            orderWrapper.eq(ShopOrder::getMerchantId, merchantId);
+                    boolean orderUpdated = false;
+                    boolean refundUpdated = false;
+                    try {
+                        // 订单进入12(退款中)；同状态无需重复更新
+                        if (originalOrderStatus == null) {
+                            throw new RuntimeException("无法获取订单当前状态，orderId=" + orderId);
                         }
-                        orderWrapper.set(ShopOrder::getOrderStatus, 3);
-                        shopOrderMapper.update(null, orderWrapper);
-                        ctx.put("orderStatusUpdated", true);
-                        log.info("订单状态已同步更新: orderId={}, {} -> 3", orderId, originalOrderStatus);
-                    }
+                        if (!Integer.valueOf(12).equals(originalOrderStatus)) {
+                            if (!updateOrderStatusOptimistically(
+                                    orderId, merchantId, orderVersion, 12)) {
+                                throw new RuntimeException("订单状态更新冲突，请刷新后重试: orderId=" + orderId);
+                            }
+                            orderUpdated = true;
+                            orderVersion = incrementVersion(orderVersion);
+                            ctx.put("currentOrderVersion", orderVersion);
+                            ctx.put("orderStatusUpdated", true);
+                            log.info("订单进入退款中: orderId={}, {} -> 12", orderId, originalOrderStatus);
+                        }
 
-                    return "refund_status_updated_to_3_and_order_completed";
+                        // 新售后单/待用户处理/待买家发货先进入2(处理中)，再进入3(退款中)
+                        int workingStatus = originalRefundStatus;
+                        if (originalRefundStatus == 0
+                                || originalRefundStatus == 5
+                                || originalRefundStatus == 6) {
+                            transitionValidator.validateRefundTransition(
+                                    originalRefundStatus, 2, String.valueOf(refundId));
+                            if (!updateRefundStatusOptimistically(
+                                    refundId, merchantId, refundVersion, 2)) {
+                                throw new RuntimeException("售后状态更新冲突，请刷新后重试: refundId=" + refundId);
+                            }
+                            refundUpdated = true;
+                            workingStatus = 2;
+                            refundVersion = incrementVersion(refundVersion);
+                            ctx.put("currentRefundVersion", refundVersion);
+                            ctx.put("refundUpdated", true);
+                        }
+
+                        if (!Integer.valueOf(3).equals(workingStatus)) {
+                            transitionValidator.validateRefundTransition(
+                                    workingStatus, 3, String.valueOf(refundId));
+                            if (!updateRefundStatusOptimistically(
+                                    refundId, merchantId, refundVersion, 3)) {
+                                throw new RuntimeException("售后状态更新冲突，请刷新后重试: refundId=" + refundId);
+                            }
+                            refundUpdated = true;
+                            refundVersion = incrementVersion(refundVersion);
+                            ctx.put("currentRefundVersion", refundVersion);
+                            ctx.put("refundUpdated", true);
+                        }
+                        return "refund_status_updated_to_3_and_order_refunding";
+                    } catch (RuntimeException e) {
+                        // 当前节点失败时不会触发节点自身compensator，先回滚本次已写入的状态
+                        if (refundUpdated) {
+                            updateRefundStatusOptimistically(
+                                    refundId, merchantId, refundVersion, originalRefundStatus);
+                            ctx.put("refundUpdated", false);
+                        }
+                        if (orderUpdated) {
+                            updateOrderStatusOptimistically(
+                                    orderId, merchantId, orderVersion, originalOrderStatus);
+                            ctx.put("orderStatusUpdated", false);
+                        }
+                        throw e;
+                    }
                 })
                 .compensator(ctx -> {
                     Long refundId = ctx.get("refundId", Long.class);
@@ -308,28 +403,20 @@ public class AgentWorkflowService {
                     Long merchantId = ctx.get("merchantId", Long.class);
                     Integer originalRefundStatus = ctx.get("originalRefundStatus", Integer.class);
                     Integer originalOrderStatus = ctx.get("currentOrderStatus", Integer.class);
+                    Integer orderVersion = loadOrderVersion(orderId, merchantId);
+                    Integer refundVersion = loadRefundVersion(refundId, merchantId);
 
                     // 回滚售后单状态
                     if (originalRefundStatus != null && Boolean.TRUE.equals(ctx.get("refundUpdated", Boolean.class))) {
-                        LambdaUpdateWrapper<ShopRefund> wrapper = new LambdaUpdateWrapper<>();
-                        wrapper.eq(ShopRefund::getId, refundId);
-                        if (merchantId != null) {
-                            wrapper.eq(ShopRefund::getMerchantId, merchantId);
-                        }
-                        wrapper.set(ShopRefund::getStatus, originalRefundStatus);
-                        shopRefundMapper.update(null, wrapper);
+                        updateRefundStatusOptimistically(
+                                refundId, merchantId, refundVersion, originalRefundStatus);
                         log.info("补偿回滚: 退款状态恢复为{}", originalRefundStatus);
                     }
 
                     // 回滚订单状态
                     if (originalOrderStatus != null && Boolean.TRUE.equals(ctx.get("orderStatusUpdated", Boolean.class))) {
-                        LambdaUpdateWrapper<ShopOrder> orderWrapper = new LambdaUpdateWrapper<>();
-                        orderWrapper.eq(ShopOrder::getId, orderId);
-                        if (merchantId != null) {
-                            orderWrapper.eq(ShopOrder::getMerchantId, merchantId);
-                        }
-                        orderWrapper.set(ShopOrder::getOrderStatus, originalOrderStatus);
-                        shopOrderMapper.update(null, orderWrapper);
+                        updateOrderStatusOptimistically(
+                                orderId, merchantId, orderVersion, originalOrderStatus);
                         log.info("补偿回滚: 订单状态恢复为{}", originalOrderStatus);
                     }
                     return null;
@@ -349,8 +436,12 @@ public class AgentWorkflowService {
                         qw.eq(ShopOrder::getMerchantId, merchantId);
                     }
                     ShopOrder order = shopOrderMapper.selectOne(qw);
-                    String originalMemo = order != null ? order.getSellerMemo() : null;
+                    if (order == null) {
+                        throw new RuntimeException("订单不存在或不属于当前租户: orderId=" + orderId);
+                    }
+                    String originalMemo = order.getSellerMemo();
                     ctx.put("originalSellerMemo", originalMemo);
+                    ctx.put("currentOrderVersion", order.getVersion());
                     // 修复：检查是否已追加过，避免 resume 重复执行时重复追加
                     String memoSuffix = "[AI售后处理] 已自动处理退款流程";
                     if (originalMemo != null && originalMemo.contains(memoSuffix)) {
@@ -360,29 +451,26 @@ public class AgentWorkflowService {
                     }
                     String newMemo = (originalMemo == null ? "" : originalMemo)
                             + memoSuffix;
-                    LambdaUpdateWrapper<ShopOrder> wrapper = new LambdaUpdateWrapper<>();
-                    wrapper.eq(ShopOrder::getId, orderId);
-                    if (merchantId != null) {
-                        wrapper.eq(ShopOrder::getMerchantId, merchantId);
+                    if (!updateOrderMemoOptimistically(
+                            orderId, merchantId, order.getVersion(), newMemo)) {
+                        throw new RuntimeException("订单备注更新冲突，请刷新后重试: orderId=" + orderId);
                     }
-                    wrapper.set(ShopOrder::getSellerMemo, newMemo);
-                    shopOrderMapper.update(null, wrapper);
                     ctx.put("memoUpdated", true);
+                    ctx.put("currentOrderVersion", incrementVersion(order.getVersion()));
                     return "memo_updated";
                 })
                 .compensator(ctx -> {
                     Long orderId = ctx.get("orderId", Long.class);
                     Long merchantId = ctx.get("merchantId", Long.class);
                     String originalMemo = ctx.get("originalSellerMemo", String.class);
+                    Integer orderVersion = ctx.get("currentOrderVersion", Integer.class);
                     if (Boolean.TRUE.equals(ctx.get("memoUpdated", Boolean.class))) {
-                        LambdaUpdateWrapper<ShopOrder> wrapper = new LambdaUpdateWrapper<>();
-                        wrapper.eq(ShopOrder::getId, orderId);
-                        if (merchantId != null) {
-                            wrapper.eq(ShopOrder::getMerchantId, merchantId);
+                        boolean restored = updateOrderMemoOptimistically(
+                                orderId, merchantId, orderVersion, originalMemo);
+                        if (restored) {
+                            ctx.put("currentOrderVersion", incrementVersion(orderVersion));
+                            log.info("补偿回滚: 卖家备注恢复原值");
                         }
-                        wrapper.set(ShopOrder::getSellerMemo, originalMemo);
-                        shopOrderMapper.update(null, wrapper);
-                        log.info("补偿回滚: 卖家备注恢复原值");
                     }
                     return null;
                 })
@@ -395,8 +483,8 @@ public class AgentWorkflowService {
                 .executor(ctx -> {
                     Long orderId = ctx.get("orderId", Long.class);
                     Long merchantId = ctx.get("merchantId", Long.class);
-                    String title = "售后退款处理完成";
-                    String content = "订单 " + orderId + " 的售后流程已处理完成，请相关同事知悉。";
+                    String title = "售后流程已进入退款处理";
+                    String content = "订单 " + orderId + " 的售后流程已进入退款处理，请相关同事知悉。";
                     boolean sent = false;
                     if (notifierService != null) {
                         try {
@@ -455,6 +543,103 @@ public class AgentWorkflowService {
                 .build());
 
         return nodes;
+    }
+
+    // ==================== 乐观锁更新 ====================
+
+    private boolean updateOrderStatusOptimistically(Long orderId, Long merchantId,
+                                                    Integer expectedVersion, int targetStatus) {
+        LambdaUpdateWrapper<ShopOrder> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(ShopOrder::getId, orderId);
+        if (merchantId != null) {
+            wrapper.eq(ShopOrder::getMerchantId, merchantId);
+        }
+        if (expectedVersion == null) {
+            wrapper.isNull(ShopOrder::getVersion);
+        } else {
+            wrapper.eq(ShopOrder::getVersion, expectedVersion);
+        }
+        wrapper.set(ShopOrder::getOrderStatus, targetStatus)
+                .setSql("version = version + 1");
+        return shopOrderMapper.update(null, wrapper) == 1;
+    }
+
+    private boolean updateRefundStatusOptimistically(Long refundId, Long merchantId,
+                                                     Integer expectedVersion, int targetStatus) {
+        LambdaUpdateWrapper<ShopRefund> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(ShopRefund::getId, refundId);
+        if (merchantId != null) {
+            wrapper.eq(ShopRefund::getMerchantId, merchantId);
+        }
+        if (expectedVersion == null) {
+            wrapper.isNull(ShopRefund::getVersion);
+        } else {
+            wrapper.eq(ShopRefund::getVersion, expectedVersion);
+        }
+        wrapper.set(ShopRefund::getStatus, targetStatus)
+                .setSql("version = version + 1");
+        return shopRefundMapper.update(null, wrapper) == 1;
+    }
+
+    private boolean updateOrderMemoOptimistically(Long orderId, Long merchantId,
+                                                  Integer expectedVersion, String memo) {
+        LambdaUpdateWrapper<ShopOrder> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(ShopOrder::getId, orderId);
+        if (merchantId != null) {
+            wrapper.eq(ShopOrder::getMerchantId, merchantId);
+        }
+        if (expectedVersion == null) {
+            wrapper.isNull(ShopOrder::getVersion);
+        } else {
+            wrapper.eq(ShopOrder::getVersion, expectedVersion);
+        }
+        wrapper.set(ShopOrder::getSellerMemo, memo)
+                .setSql("version = version + 1");
+        return shopOrderMapper.update(null, wrapper) == 1;
+    }
+
+    private Integer incrementVersion(Integer version) {
+        return version == null ? null : version + 1;
+    }
+
+    private Integer loadOrderVersion(Long orderId, Long merchantId) {
+        LambdaQueryWrapper<ShopOrder> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ShopOrder::getId, orderId);
+        if (merchantId != null) {
+            wrapper.eq(ShopOrder::getMerchantId, merchantId);
+        }
+        ShopOrder order = shopOrderMapper.selectOne(wrapper);
+        return order != null ? order.getVersion() : null;
+    }
+
+    private Integer loadRefundVersion(Long refundId, Long merchantId) {
+        LambdaQueryWrapper<ShopRefund> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ShopRefund::getId, refundId);
+        if (merchantId != null) {
+            wrapper.eq(ShopRefund::getMerchantId, merchantId);
+        }
+        ShopRefund refund = shopRefundMapper.selectOne(wrapper);
+        return refund != null ? refund.getVersion() : null;
+    }
+
+    private void assertWorkflowTenant(ExecutionContext context, Long merchantId) {
+        if (merchantId == null) {
+            return;
+        }
+        Long actualTenant = context.get("merchantId", Long.class);
+        if (!merchantId.equals(actualTenant)) {
+            throw new AccessDeniedException("无权访问其他租户的工作流执行记录");
+        }
+    }
+
+    private void assertWorkflowApproval(ExecutionContext context, Long approvalId) {
+        if (approvalId == null) {
+            return;
+        }
+        Long boundApprovalId = context.get("approvalId", Long.class);
+        if (!approvalId.equals(boundApprovalId)) {
+            throw new AccessDeniedException("审批单与工作流执行记录不匹配");
+        }
     }
 
     // ==================== Checkpoint 持久化 ====================
@@ -516,6 +701,7 @@ public class AgentWorkflowService {
         for (Map.Entry<String, String> entry : globalJson.entrySet()) {
             try {
                 Object value = objectMapper.readValue(entry.getValue(), Object.class);
+                value = normalizeContextValue(entry.getKey(), value);
                 context.put(entry.getKey(), value);
             } catch (Exception e) {
                 context.put(entry.getKey(), entry.getValue());
@@ -546,6 +732,24 @@ public class AgentWorkflowService {
         }
 
         return context;
+    }
+
+    private Object normalizeContextValue(String key, Object value) {
+        if (value == null) {
+            return null;
+        }
+        if ("orderId".equals(key) || "refundId".equals(key)
+                || "merchantId".equals(key) || "approvalId".equals(key)) {
+            if (value instanceof Number number) {
+                return number.longValue();
+            }
+            try {
+                return Long.parseLong(value.toString());
+            } catch (NumberFormatException ignored) {
+                return value;
+            }
+        }
+        return value;
     }
 
     private long countStatus(ExecutionContext context, NodeStatus status) {
