@@ -1,9 +1,15 @@
 package cn.qihangerp.agent.evaluation;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -37,6 +43,19 @@ public class MetricsCollector {
     // 全局统计
     private final GlobalMetrics globalMetrics = new GlobalMetrics();
 
+    /** Micrometer 注册表（可选）：存在 actuator/prometheus 时把指标导出到 /actuator/prometheus */
+    private final ObjectProvider<MeterRegistry> meterRegistryProvider;
+
+    /** 无参构造：单元测试/无 Spring 环境下使用（不做 Micrometer 导出） */
+    public MetricsCollector() {
+        this.meterRegistryProvider = null;
+    }
+
+    @Autowired
+    public MetricsCollector(ObjectProvider<MeterRegistry> meterRegistryProvider) {
+        this.meterRegistryProvider = meterRegistryProvider;
+    }
+
     /**
      * 记录Tool调用成功
      *
@@ -53,6 +72,7 @@ public class MetricsCollector {
         // 更新全局指标
         globalMetrics.recordSuccess(durationMs);
 
+        recordMicrometer(toolName, category, durationMs, true, null);
         log.debug("记录成功调用: Tool={}, Duration={}ms, MerchantId={}", toolName, durationMs, merchantId);
     }
 
@@ -75,8 +95,49 @@ public class MetricsCollector {
         // 更新全局指标
         globalMetrics.recordFailure(durationMs, errorType);
 
+        recordMicrometer(toolName, category, durationMs, false, errorType);
         log.warn("记录失败调用: Tool={}, ErrorType={}, Duration={}ms, MerchantId={}",
                 toolName, errorType, durationMs, merchantId);
+    }
+
+    /**
+     * 同步写入 Micrometer（counter + timer，timer 带 P50/P95/P99 分位）。
+     * Micrometer 未装配或记录失败时静默降级，不影响内部统计。
+     */
+    private void recordMicrometer(String toolName, String category, long durationMs,
+                                  boolean success, String errorType) {
+        if (meterRegistryProvider == null) {
+            return;
+        }
+        meterRegistryProvider.ifAvailable(registry -> {
+            try {
+                Counter.builder("agent.tool.calls")
+                        .description("AI Tool 调用次数")
+                        .tag("tool", toolName)
+                        .tag("category", category != null ? category : "unknown")
+                        .tag("result", success ? "success" : "failure")
+                        .register(registry)
+                        .increment();
+
+                Timer.builder("agent.tool.duration")
+                        .description("AI Tool 执行耗时")
+                        .tag("tool", toolName)
+                        .publishPercentiles(0.5, 0.95, 0.99)
+                        .register(registry)
+                        .record(Duration.ofMillis(Math.max(durationMs, 0)));
+
+                if (!success && errorType != null) {
+                    Counter.builder("agent.tool.errors")
+                            .description("AI Tool 失败次数（按错误类型）")
+                            .tag("tool", toolName)
+                            .tag("error", errorType)
+                            .register(registry)
+                            .increment();
+                }
+            } catch (Exception e) {
+                log.debug("Micrometer指标记录失败: {}", e.getMessage());
+            }
+        });
     }
 
     /**

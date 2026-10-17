@@ -58,6 +58,9 @@ public class JwtAuthenticationTokenFilter extends OncePerRequestFilter {
                 || url.contains("/system/config")
                 || url.contains("/oauth_callback")
                 || url.contains("/sse/notify_msg")
+                // 监控端点：健康检查与 Prometheus 抓取无需登录（与 SecurityConfig 的 permitAll 保持一致）
+                || url.startsWith("/actuator/health")
+                || url.startsWith("/actuator/prometheus")
         ) {
             // 登录页面，放行 || request.getRequestURI().equals("/order/get_detail")
             chain.doFilter(request, response);

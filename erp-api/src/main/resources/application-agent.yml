@@ -2,11 +2,25 @@
 # 请将此配置合并到 erp-api/src/main/resources/application.yml
 
 spring:
+  # 本机开发密钥（仓库根目录 application-local.yml，已 gitignore）；
+  # 放在 profile 配置文件里导入，保证其优先级高于本文件的占位默认值。
+  config:
+    import: optional:file:./application-local.yml
+
   # ============ AI配置 ============
   ai:
-    # 启用OpenAI兼容的Embedding自动配置（指向DashScope）
+    # Embedding 提供方：默认 ollama（本地免费，无需云 Key）
+    # 若要用阿里云百炼，设 EMBEDDING_PROVIDER=openai 并把下面 openai.embedding.enabled 打开
     model:
-      embedding: openai
+      embedding: ${EMBEDDING_PROVIDER:ollama}
+
+    # ============ 本地 Ollama Embedding（默认，1024 维 bge-m3）============
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      embedding:
+        enabled: true
+        options:
+          model: ${OLLAMA_EMBEDDING_MODEL:bge-m3}
 
     # DeepSeek模型配置
     # DeepSeek模型配置
@@ -36,7 +50,7 @@ spring:
 
       # Embedding模型配置（向量化，阿里云百炼）
       embedding:
-        enabled: true
+        enabled: ${OPENAI_EMBEDDING_ENABLED:false}
         base-url: ${DASHSCOPE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
         api-key: ${DASHSCOPE_API_KEY:}
         options:
@@ -73,7 +87,7 @@ spring:
       host: localhost
       port: 6379
       # 注意：本机Redis未设置密码，请勿配置password（否则AUTH报错）
-      # password: qihang123456
+      # 若 Redis 设置了密码，用环境变量注入：password: ${REDIS_PASSWORD:}
       database: 0
       timeout: 6000ms
       lettuce:
@@ -108,10 +122,11 @@ agent:
     approval-timeout: 300
 
   # 向量存储开关（PGVector）
-  # true: 启用，需要PostgreSQL+pgvector容器运行（Docker: pgvector）
-  # false: 禁用，应用不依赖PostgreSQL，检索降级为 MySQL FULLTEXT → BM25
+  # 默认不启用（PgVectorManualConfig 的 @ConditionalOnProperty matchIfMissing=false）：
+  #   - Docker/服务器：设置环境变量 AGENT_VECTOR_STORE_ENABLED=true
+  #   - 本机开发：在仓库根目录 application-local.yml 中设置 agent.vector-store.enabled: true
+  # 不启用时应用不依赖 PostgreSQL，检索降级为 MySQL FULLTEXT → BM25
   vector-store:
-    enabled: false
     host: ${PGVECTOR_HOST:localhost}
     port: ${PGVECTOR_PORT:5432}
     database: ${PGVECTOR_DATABASE:erp_vector}
@@ -142,3 +157,20 @@ agent:
     mrr-target: 0.7
     llm-enabled: false          # 真实LLM质量打分开关，开启后产生API费用且评测耗时变长
     llm-timeout-seconds: 60
+
+# ============ 监控（Micrometer / Prometheus）============
+# 工具调用指标同时写入 MeterRegistry，Prometheus 可抓取 /actuator/prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: never
+  metrics:
+    tags:
+      application: qihang-erp-agent
+    distribution:
+      percentiles-histogram:
+        agent.tool.duration: true

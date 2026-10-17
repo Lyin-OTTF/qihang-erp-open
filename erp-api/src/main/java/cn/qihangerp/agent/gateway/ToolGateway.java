@@ -178,7 +178,7 @@ public class ToolGateway {
                             && approvalService.isApproved(context.getTraceId(), toolName, args);
                     if (alreadyApproved) {
                         log.info("Tool[{}]已有审批通过记录，直接执行", toolName);
-                        ApprovalRequest approved = approvalService.getApprovedApproval(context.getTraceId(), toolName);
+                        ApprovalRequest approved = approvalService.getApprovedApproval(context.getTraceId(), toolName, args);
                         if (approved != null) {
                             context.setApprovalId(approved.getId());
                             context.setApproved(true);

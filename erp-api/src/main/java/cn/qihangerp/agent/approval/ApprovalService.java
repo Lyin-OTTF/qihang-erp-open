@@ -196,6 +196,15 @@ public class ApprovalService {
      * @param args 当前执行的工具参数，为 null 时只做 traceId+toolName+过期判断
      */
     public boolean isApproved(String traceId, String toolName, Object[] args) {
+        return findApproved(traceId, toolName, args) != null;
+    }
+
+    /**
+     * 按 traceId + toolName 查询"仍有效且参数匹配"的已批准记录。
+     * isApproved 与 getApprovedApproval 共用同一套过滤条件，
+     * 避免"判定用参数比对、回写却取到另一条审批"的不一致。
+     */
+    private ApprovalRequest findApproved(String traceId, String toolName, Object[] args) {
         LambdaQueryWrapper<ApprovalRequest> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ApprovalRequest::getTraceId, traceId)
                 .eq(ApprovalRequest::getToolName, toolName)
@@ -205,7 +214,7 @@ public class ApprovalService {
                 .last("LIMIT 1");
         ApprovalRequest approval = approvalMapper.selectOne(wrapper);
         if (approval == null) {
-            return false;
+            return null;
         }
         // 参数摘要匹配：如果当前调用带了 args，且审批记录里存了 inputParams，则比对
         if (args != null && args.length > 0 && approval.getInputParams() != null) {
@@ -214,27 +223,27 @@ public class ApprovalService {
                 if (!currentArgsJson.equals(approval.getInputParams())) {
                     log.info("审批参数不匹配，需重新审批: tool={}, traceId={}, 已批准参数={}, 当前参数={}",
                             toolName, traceId, approval.getInputParams(), currentArgsJson);
-                    return false;
+                    return null;
                 }
             } catch (JsonProcessingException e) {
                 log.warn("参数摘要比对失败，保守起见要求重新审批: {}", e.getMessage());
-                return false;
+                return null;
             }
         }
-        return true;
+        return approval;
     }
 
     /**
      * 获取已批准的审批记录（用于执行后标记）。
+     * 与 isApproved 使用同一套过滤（状态、过期、参数摘要）。
      */
+    public ApprovalRequest getApprovedApproval(String traceId, String toolName, Object[] args) {
+        return findApproved(traceId, toolName, args);
+    }
+
+    /** 兼容旧调用：不校验参数，仅按 traceId + toolName + 未过期查询。 */
     public ApprovalRequest getApprovedApproval(String traceId, String toolName) {
-        LambdaQueryWrapper<ApprovalRequest> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ApprovalRequest::getTraceId, traceId)
-                .eq(ApprovalRequest::getToolName, toolName)
-                .eq(ApprovalRequest::getStatus, ApprovalRequest.Status.APPROVED.name())
-                .orderByDesc(ApprovalRequest::getCreatedAt)
-                .last("LIMIT 1");
-        return approvalMapper.selectOne(wrapper);
+        return findApproved(traceId, toolName, null);
     }
 
     /**

@@ -8,6 +8,7 @@ import cn.qihangerp.agent.dag.ExecutionContext;
 import cn.qihangerp.agent.dag.NodeStatus;
 import cn.qihangerp.agent.graph.CheckpointManager;
 import cn.qihangerp.agent.graph.GraphState;
+import cn.qihangerp.erp.notify.NotifierService;
 import cn.qihangerp.statemachine.TransitionValidator;
 import cn.qihangerp.mapper.ShopOrderMapper;
 import cn.qihangerp.mapper.ShopRefundMapper;
@@ -60,6 +61,10 @@ public class AgentWorkflowService {
     private final ObjectMapper objectMapper;
     private final DAGScheduler dagScheduler;
     private final ActionLedgerService actionLedgerService;
+
+    /** 通知服务：走 SysAlertChannel 配置的飞书/钉钉/企微 Webhook；不可用时降级为日志 */
+    @Autowired(required = false)
+    private NotifierService notifierService;
 
     @Autowired
     public AgentWorkflowService(ShopOrderMapper shopOrderMapper,
@@ -389,8 +394,19 @@ public class AgentWorkflowService {
                 .dependsOn("update_memo")
                 .executor(ctx -> {
                     Long orderId = ctx.get("orderId", Long.class);
-                    log.info("发送通知: orderId={}, 售后处理完成", orderId);
-                    return "notification_sent";
+                    Long merchantId = ctx.get("merchantId", Long.class);
+                    String title = "售后退款处理完成";
+                    String content = "订单 " + orderId + " 的售后流程已处理完成，请相关同事知悉。";
+                    boolean sent = false;
+                    if (notifierService != null) {
+                        try {
+                            sent = notifierService.notifyAll(title, content);
+                        } catch (Exception e) {
+                            log.warn("工作流通知发送失败（不影响主流程）: {}", e.getMessage());
+                        }
+                    }
+                    log.info("发送通知: orderId={}, merchantId={}, sent={}", orderId, merchantId, sent);
+                    return sent ? "notification_sent" : "notification_skipped";
                 })
                 .build());
 

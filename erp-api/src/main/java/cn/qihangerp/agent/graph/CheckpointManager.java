@@ -44,7 +44,10 @@ public class CheckpointManager {
      * @param state 当前图状态
      * @return 快照版本号
      */
-    public int saveCheckpoint(String workflowId, String executionId, GraphState state) {
+    public synchronized int saveCheckpoint(String workflowId, String executionId, GraphState state) {
+        // synchronized：DAG 的节点完成回调在 dag-worker 线程里触发，同一批次多个节点可能并发保存，
+        // 先查 MAX(version) 再插入会产生竞态（撞 uk_execution_version）。checkpoint 写入频率低，
+        // 单实例内串行化即可；多实例部署需改成数据库原子递增。
         // 获取当前最大版本号
         Integer maxVersion = jdbcTemplate.queryForObject(
                 "SELECT COALESCE(MAX(checkpoint_version), 0) FROM agent_graph_checkpoint WHERE execution_id = ?",

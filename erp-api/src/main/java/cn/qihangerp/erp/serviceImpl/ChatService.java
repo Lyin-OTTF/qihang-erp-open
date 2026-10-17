@@ -6,6 +6,7 @@ import cn.qihangerp.agent.tenant.TenantContext;
 import cn.qihangerp.erp.serviceImpl.ai.AiOrchestrationService;
 import cn.qihangerp.erp.serviceImpl.ai.GoodsTools;
 import cn.qihangerp.erp.serviceImpl.ai.InventoryTools;
+import cn.qihangerp.erp.serviceImpl.ai.KnowledgeTools;
 import cn.qihangerp.erp.serviceImpl.ai.MemberTools;
 import cn.qihangerp.erp.serviceImpl.ai.OrderTools;
 import cn.qihangerp.erp.serviceImpl.ai.OrderActionTools;
@@ -59,6 +60,7 @@ public class ChatService {
     private final WarehouseTools warehouseTools;
     private final StockFlowTools stockFlowTools;
     private final OrderActionTools orderActionTools;
+    private final KnowledgeTools knowledgeTools;
     private final SuggestionTools suggestionTools;
 
     private static final String SYSTEM_PROMPT = """
@@ -73,6 +75,37 @@ public class ChatService {
     private static final int MEMORY_TOKEN_BUDGET = 2000;
     /** 单层记忆字符预算（TEAM/USER/SESSION 各占约1/3，留余量） */
     private static final int LAYER_CHAR_BUDGET = 450;
+    /** 会话历史预算：最多保留最近 N 条消息 */
+    private static final int MAX_HISTORY_MESSAGES = 20;
+    /** 会话历史预算：最多保留最近 N 个字符（含用户/助手消息） */
+    private static final int MAX_HISTORY_CHARS = 6000;
+
+    /**
+     * 按"最近优先"裁剪会话历史，防止长会话把上下文窗口撑爆。
+     * 返回结果保持原有时间顺序（旧的在前、新的在后）。
+     */
+    private List<AiConversationHistory> trimHistory(List<AiConversationHistory> history) {
+        if (history == null || history.isEmpty()) {
+            return new ArrayList<>();
+        }
+        int fromIndex = Math.max(0, history.size() - MAX_HISTORY_MESSAGES);
+        List<AiConversationHistory> tail = new ArrayList<>(history.subList(fromIndex, history.size()));
+
+        int chars = 0;
+        int keepFrom = tail.size();
+        for (int i = tail.size() - 1; i >= 0; i--) {
+            String content = tail.get(i).getContent();
+            chars += content == null ? 0 : content.length();
+            if (chars > MAX_HISTORY_CHARS) {
+                break;
+            }
+            keepFrom = i;
+        }
+        if (keepFrom > 0) {
+            log.debug("会话历史超预算，裁剪 {} 条旧消息", keepFrom);
+        }
+        return new ArrayList<>(tail.subList(keepFrom, tail.size()));
+    }
 
     /**
      * 从记忆系统读取上下文，注入到系统提示中。
@@ -187,7 +220,8 @@ public class ChatService {
 
     public void streamResponse(AiConfig config, SseEmitter emitter, String sessionId, Long userId) {
         try {
-            List<AiConversationHistory> history = historyService.getConversationForUser(sessionId, userId);
+            List<AiConversationHistory> history = trimHistory(
+                    historyService.getConversationForUser(sessionId, userId));
 
             // 租户ID权威来源：登录态（拦截器已把登录态租户写入 TenantContext，此处再直接从登录态取，双重保障）
             Long merchantId = resolveMerchantId();
@@ -221,7 +255,7 @@ public class ChatService {
             toolContext.put("source", "WebUI");
             log.info("AI对话 sessionId={} userId={} merchantId={} traceId={}", sessionId, userId, merchantId, traceId);
 
-            ChatClient chatClient = orchestrationService.buildChatClient(config, toolContext, goodsTools, orderTools, orderActionTools, refundTools, inventoryTools, shopTools, purchaseTools, memberTools, supplierTools, logisticsTools, warehouseTools, stockFlowTools, suggestionTools);
+            ChatClient chatClient = orchestrationService.buildChatClient(config, toolContext, goodsTools, orderTools, orderActionTools, refundTools, inventoryTools, shopTools, purchaseTools, memberTools, supplierTools, logisticsTools, warehouseTools, stockFlowTools, suggestionTools, knowledgeTools);
 
             StringBuilder fullResponse = new StringBuilder();
 

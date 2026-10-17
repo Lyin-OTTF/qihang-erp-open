@@ -34,11 +34,15 @@ class DistributedLockServiceTest {
     @BeforeAll
     static void setup() {
         Config config = new Config();
-        config.useSingleServer()
+        var singleServer = config.useSingleServer()
                 .setAddress("redis://127.0.0.1:6379")
                 .setDatabase(0)
                 .setConnectionMinimumIdleSize(1)
                 .setConnectionPoolSize(4);
+        String redisPassword = System.getenv().getOrDefault("REDIS_PASSWORD", "");
+        if (!redisPassword.isBlank()) {
+            singleServer.setPassword(redisPassword);
+        }
         redissonClient = Redisson.create(config);
         lockService = new DistributedLockService(redissonClient);
     }
