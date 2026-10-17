@@ -109,7 +109,7 @@
 - 热点商品缓存：GoodsCacheService，Redis缓存高频商品查询
 - 分布式锁：StringRedisTemplate手写，SET NX + UUID令牌防误删 + 等待重试
 - 审批流：ApprovalService，过期自动失效、参数摘要匹配防篡改、通过后自动落Ledger
-- Grafana监控：8个业务面板（Tool调用量、成功率、耗时P50/P95/P99、错误分布等）
+- 监控：Micrometer 指标写入 MeterRegistry，Prometheus 抓取 `/actuator/prometheus`；`grafana/agent-metrics-dashboard.json` 为 Prometheus 数据源面板（Tool调用量、成功率、耗时P95、错误分布等 8 项）
 - 库存并发测试：50线程直连MySQL真实集成测试，验证乐观锁和原子更新
 
 ---
@@ -137,9 +137,16 @@
 
 **检索流程**：
 ```
-用户问题 → 并行执行 [PGVector向量检索] + [BM25关键词检索]
+用户问题 → 顺序执行 [PGVector向量检索] + [BM25关键词检索]
     → RRF融合排序 → Rerank重排序(Top-N) → 返回Top-K
 ```
+
+**接入对话**：`KnowledgeTools.searchKnowledge`（OBSERVE 级只读工具）把 RAG 接入聊天主链路——
+模型遇到"流程/规则/规范"类问题时先检索知识库，工具返回带 chunkId 的引用片段，模型据此作答并标注引用编号。
+（`/api/agent/rag/**` 仍保留为独立检索/评测接口。）
+
+**Embedding**：默认走本地 Ollama（`OLLAMA_EMBEDDING_MODEL=bge-m3`，1024 维，无需云 Key）；
+也可切回阿里云百炼（`EMBEDDING_PROVIDER=openai` + `OPENAI_EMBEDDING_ENABLED=true` + `DASHSCOPE_API_KEY`）。
 
 **三级降级**：
 1. PGVector（真向量语义，1024维 HNSW索引，COSINE距离）
@@ -198,7 +205,7 @@ fetch_inventory ─────────────────────�
 
 - **租户隔离**：所有查询强制带merchant_id过滤，ToolGateway fail-closed校验
 - **自治等级**：OBSERVE（只读）/ SUGGEST（建议）/ EXECUTE（直接执行）/ ESCALATE（需审批）
-- **管理员权限**：ToolPolicy配置、RAG索引管理等敏感接口要求平台管理员（user_type=0）
+- **管理员权限**：ToolPolicy配置、RAG索引管理等敏感接口要求平台管理员（user_type=00）
 - **会话归属校验**：ChatController先校验会话归属再保存消息，防止越权读写他人会话
 
 ### 5.2 并发安全
@@ -247,10 +254,14 @@ fetch_inventory ─────────────────────�
 
 ### 7.1 已知限制
 
-1. **Flyway空占位脚本**：V1_11_1/V1_12_0/V1_16_0/V1_17_0/V1_21_0为纯注释占位，需确认flyway_schema_history后清理
-2. **集成测试未全量跑通**：@Tag("it")的14个集成测试需要MySQL+Redis+PG同时启动，尚未在CI中自动化
-3. **Rerank为轻量级实现**：基于查询词覆盖度+位置+密度加权，未使用交叉编码器或LLM重排序
-4. **BM25为内存实现**：应用重启后索引丢失，需重新加载知识库；生产环境建议迁移到Elasticsearch
+1. **集成测试已在CI**：`@Tag("it")` 的集成测试通过 MySQL/Redis service container 在 `integration-tests` Job 中执行；本地真实环境全量 `-Pall-tests` 229 个用例全绿
+2. **Rerank为轻量级实现**：基于查询词覆盖度+位置+密度加权，未使用交叉编码器或 LLM 重排序
+3. **BM25为内存实现**：应用重启后索引丢失，需重新加载知识库；多实例部署各持一份索引，生产环境建议迁移到 Elasticsearch
+4. **记忆是 KV 而非语义记忆**：分层/TTL/脱敏/租户隔离已实现，但召回是键值读取，没有向量语义召回
+5. **DAG/条件边是自研简化实现**：不是方案文档里提到的 PaiAgent LangGraph4j；二者不要混为一谈
+6. **工作流通知依赖渠道配置**：走 `SysAlertChannel` 的飞书/钉钉/企微 Webhook，未配置渠道时只记录日志
+7. **云 Embedding 未验证**：已用本地 Ollama + bge-m3 验证"真实向量化 → pgvector 写入 → 语义检索"闭环（`OllamaEmbeddingPgVectorIntegrationTest`）；阿里云百炼（DashScope）路径未跑过，需要真实 Key
+8. **Flyway空占位脚本**：V1_11_1/V1_12_0/V1_16_0/V1_17_0/V1_21_0 为纯注释占位，可在确认 flyway_schema_history 后清理
 
 ### 7.2 后续迭代方向
 
@@ -258,8 +269,9 @@ fetch_inventory ─────────────────────�
 2. **BM25持久化**：迁移到Elasticsearch或Tantivy，支持大规模知识库
 3. **多模态支持**：支持图片、PDF等非文本内容的理解和检索
 4. **Agent规划能力**：引入ReAct/Plan-and-Execute框架，支持复杂多步任务自主规划
-5. **CI/CD自动化**：集成测试纳入GitHub Actions，每次提交自动跑全量测试
+5. **CI/CD自动化**：单元测试已接入 GitHub Actions；后续用 Testcontainers 把集成测试也纳入 CI
 6. **Git历史清洗**：生产环境部署前用BFG清洗历史中的旧密钥
+7. **记忆语义化**：给分层记忆加向量召回，从"键值记忆"升级为"语义记忆"
 
 ---
 

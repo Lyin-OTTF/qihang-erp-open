@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+
+jobs:
+  unit-tests:
+    name: 单元测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # 单元测试（@Tag("it") 的集成测试默认被 surefire 排除，不依赖外部 MySQL/Redis）
+      - name: Build and unit test
+        run: mvn -B -pl erp-api -am test
+
+      - name: Upload surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/surefire-reports/**'
+          if-no-files-found: ignore
+
+  integration-tests:
+    name: 集成测试（MySQL + Redis）
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: "1234"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -p1234"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      pgvector:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: "1234"
+          POSTGRES_DB: erp_vector
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Install MySQL client
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq default-mysql-client
+
+      # 1) 导入业务库基线（docs/qihang-erp.sql 自带 CREATE DATABASE/USE qihang-erp）
+      - name: Import business schema baseline
+        run: mysql -h127.0.0.1 -uroot -p1234 --default-character-set=utf8mb4 < docs/qihang-erp.sql
+
+      # 2) 按版本顺序执行 agent 迁移（脚本幂等，可重复执行）
+      - name: Apply agent migrations
+        run: |
+          for f in $(ls erp-api/src/main/resources/db/migration/V1_*.sql | sort -V); do
+            echo "applying $f"
+            mysql -h127.0.0.1 -uroot -p1234 --default-character-set=utf8mb4 qihang-erp < "$f"
+          done
+
+      # 3) 跑全量测试（含 @Tag("it") 集成测试）
+      - name: Run all tests (unit + integration)
+        env:
+          MYSQL_PASSWORD: "1234"
+          REDIS_PASSWORD: ""
+          JWT_SECRET: ci-secret-0123456789abcdef0123456789
+          DEEPSEEK_API_KEY: ci-placeholder
+          DASHSCOPE_API_KEY: ci-placeholder
+          PGVECTOR_PASSWORD: "1234"
+          PGVECTOR_DATABASE: erp_vector
+          PGVECTOR_USERNAME: postgres
+        run: mvn -B -pl erp-api -am test -Pall-tests
+
+      - name: Upload surefire reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports-it
+          path: '**/target/surefire-reports/**'
+          if-no-files-found: ignore

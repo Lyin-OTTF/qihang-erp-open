@@ -43,8 +43,8 @@ class ApprovalServiceTest {
         MysqlDataSource ds = new MysqlDataSource();
         ds.setUrl("jdbc:mysql://127.0.0.1:3306/qihang-erp"
                 + "?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true");
-        ds.setUser("root");
-        ds.setPassword("1234");
+        ds.setUser(System.getenv().getOrDefault("MYSQL_USERNAME", "root"));
+        ds.setPassword(System.getenv().getOrDefault("MYSQL_PASSWORD", "1234"));
 
         MybatisConfiguration config = new MybatisConfiguration();
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();

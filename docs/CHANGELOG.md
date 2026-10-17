@@ -4,6 +4,144 @@
 
 ---
 
+## [凭据轮换：MySQL / PostgreSQL / Redis / JWT / 开放平台] 2026-10-17
+
+**目标**：把 A 类（本机可操作）的泄露凭据全部轮换，旧值作废。
+
+| 凭据 | 处理 |
+|------|------|
+| MySQL root | `ALTER USER` 轮换口令；14 个集成测试改为读取 `MYSQL_USERNAME`/`MYSQL_PASSWORD`（默认仍兼容 root/1234） |
+| PostgreSQL postgres | `ALTER USER` 轮换口令；应用从 `PGVECTOR_PASSWORD` 读取 |
+| Redis | 启用 `requirepass` 并用 `CONFIG REWRITE` 持久化到 `redis-service.conf`；3 个 Redis 集成测试改为读取 `REDIS_PASSWORD` |
+| JWT | 轮换 `JWT_SECRET`（旧 token 全部失效，需要重新登录） |
+| 开放平台客户端 | `sys_open_auth` 的 app_key/app_secret 已更新（旧客户端凭据失效） |
+
+**本机配置**：新增仓库根目录 `application-local.yml`（已 gitignore，不提交、不打进 jar），
+由 `application-agent.yml` 通过 `spring.config.import: optional:file:./application-local.yml` 加载；
+部署环境没有该文件时继续使用环境变量。
+
+**验证**：无环境变量（仅本地配置文件）启动成功，MySQL/Redis/PGVector 全部连通；`-Pall-tests` 231 个用例全绿。
+
+---
+
+## [本地 Ollama Embedding：真实向量化闭环打通] 2026-10-16
+
+**目标**：不依赖付费云 Key，用本地模型把"真实 Embedding → pgvector → 语义检索"跑通。
+
+### 变更
+
+| 文件 | 说明 |
+|------|------|
+| `erp-api/pom.xml` | 新增 `spring-ai-starter-model-ollama` |
+| `erp-api/src/main/resources/application-agent.yml` | Embedding 提供方改为 `${EMBEDDING_PROVIDER:ollama}`；新增 `spring.ai.ollama.*`（默认模型 `bge-m3`，base-url 可配）；百炼 embedding 改为 `${OPENAI_EMBEDDING_ENABLED:false}` 开关，避免两个 EmbeddingModel Bean 冲突 |
+| `erp-api/src/test/.../OllamaEmbeddingPgVectorIntegrationTest.java` | 新增 `@Tag("it")` 集成测试：用本地 Ollama bge-m3 真实向量化中文 SOP → 写入 pgvector → 自然语言检索并断言排序；Ollama/PG 不可达时自动跳过；显式放宽读超时以适配 CPU 推理 |
+| `docs/DEPLOYMENT.md` | 新增 3.4 本地 Embedding（Ollama）步骤 + 4.2 环境变量说明 |
+
+### 验证
+
+- `ollama pull bge-m3` → 1024 维向量（与 `vector_store(embedding vector(1024))` 一致）。
+- `mvn -pl erp-api -am test -Pall-tests` → **231 个用例全绿**，含真实 Ollama embedding 检索用例。
+- `AGENT_VECTOR_STORE_ENABLED=true` 真实启动成功：`PgVectorStore` 建表校验 + `PGVector向量检索器已启用（VectorStore已注入）`。
+
+---
+
+## [PGVector 启用态验证 / Prometheus 面板 / 集成测试进 CI] 2026-10-16
+
+**目标**：补齐上一轮遗留的两项（PGVector 启用态、Grafana 面板），并把 pgvector 也纳入集成测试。
+
+### PGVector 启用态
+
+| 项目 | 结果 |
+|------|------|
+| 开关可运维化 | `agent.vector-store.enabled` 改为 `${AGENT_VECTOR_STORE_ENABLED:false}`，可用环境变量开关，默认仍不依赖 PG |
+| 启用态启动 | `AGENT_VECTOR_STORE_ENABLED=true` 启动成功：连接 `pgvector/pgvector:pg16`（`erp_vector`），`PgVectorStore` 建表校验通过，日志 `PGVector向量检索器已启用（VectorStore已注入）` |
+| 检索链路 | 新增 `PgVectorStoreIntegrationTest`（@Tag("it")）：用确定性 bigram 哈希 Embedding 桩对真实 PostgreSQL 做 insert + cosine 相似度检索并断言排序；PG 不可达时自动跳过 |
+
+### 监控面板改为 Prometheus 数据源
+
+| 文件 | 说明 |
+|------|------|
+| `erp-api/src/main/resources/grafana/agent-metrics-dashboard.json` | 由 Infinity(HTTP JSON) 改为 Prometheus 数据源：全局成功率、平均耗时、总调用/失败数、各工具调用量、性能明细表、失败分布、各工具 P95 耗时（8 个面板，JSON 已校验可导入） |
+
+### CI
+
+| 文件 | 说明 |
+|------|------|
+| `.github/workflows/ci.yml` | `integration-tests` Job 增加 `pgvector/pgvector:pg16` service container，使 pgvector 集成测试在 CI 中真实执行 |
+
+---
+
+## [集成测试真实跑通 / 启动验证 / CI 补全] 2026-10-16
+
+**目标**：把"测试与启动"从"编译能过"提升到"真跑过"，并让集成测试进入 CI。
+
+### 真实环境验证（本机 MySQL 8.0 + Redis）
+
+| 项目 | 结果 |
+|------|------|
+| 全量测试（单元 + 集成） | `mvn -pl erp-api -am test -Pall-tests` → **229 个用例全绿**（含 50 线程库存并发、跨租户 E2E、RAG 真实跑批、RAG 评测、记忆持久化、审批、Trace、工作流） |
+| 干净库引导 | 官方基线 dump（145 张表）+ 全部 `V1_*` 迁移在临时库按序执行成功，`rag_document`/`agent_rag_evaluation` 各 100 条 |
+| 应用真实启动 | Flyway 应用到 `v1.29.0`；Redisson 连接 Redis；禁用的 PGVector 正确降级到 MySQL FT；知识库加载 100 chunk；PolicyRegistry 注册 17 个工具策略；`Started ErpApi in ~13s` |
+| 监控端点 | `/actuator/health` → `{"status":"UP"}`；`/actuator/prometheus` → 200 + 44KB Prometheus 文本（含 `application="qihang-erp-agent"` 标签） |
+
+### 修复
+
+| 文件 | 说明 |
+|------|------|
+| `security/.../JwtAuthenticationTokenFilter.java` | 白名单补 `/actuator/health`、`/actuator/prometheus`：此前该过滤器对白名单外请求直接短路返回"授权过期"JSON，导致 `SecurityConfig` 的 `permitAll` 根本不生效，Prometheus 抓取拿不到数据 |
+
+### 工程化
+
+| 文件 | 说明 |
+|------|------|
+| `.github/workflows/ci.yml` | 拆成两个 Job：`unit-tests`（默认单元测试）与 `integration-tests`（MySQL/Redis service container + 基线导入 + 迁移 + `-Pall-tests`） |
+| `erp-api/src/test/.../MetricsCollectorMicrometerTest.java` | 新增单测：验证工具调用写入 Micrometer counter/timer |
+| `docs/DEPLOYMENT.md` | 新增 5.5 测试章节（三种测试命令、集成测试连接参数、干净库引导步骤） |
+
+---
+
+## [RAG接入对话 / 监控真实化 / 工程化补强] 2026-10-16
+
+**目标**：把上一轮评审里"名实不完全相符"和"工程化短板"的部分落到实处，而不是继续堆模块。
+
+### RAG 接入对话主链路
+
+| 文件 | 说明 |
+|------|------|
+| `erp-api/.../serviceImpl/ai/KnowledgeTools.java` | 新增只读工具 `searchKnowledge`（OBSERVE 级）：模型遇到流程/规则类问题时先检索知识库，返回带 chunkId 的引用片段 |
+| `erp-api/.../serviceImpl/ChatService.java` | 工具列表接入 `knowledgeTools`；新增会话历史预算（最近 20 条 / 6000 字符） |
+
+### 监控真实化
+
+| 文件 | 说明 |
+|------|------|
+| `erp-api/pom.xml` | 新增 `spring-boot-starter-actuator` + `micrometer-registry-prometheus` |
+| `erp-api/.../evaluation/MetricsCollector.java` | 工具调用同时写入 Micrometer（counter + timer 带 P50/P95/P99） |
+| `erp-api/src/main/resources/application-agent.yml` | 暴露 `/actuator/prometheus`；`agent.tool.duration` 开分位直方图 |
+| `security/.../SecurityConfig.java` | 匿名放行 `/actuator/health`、`/actuator/prometheus`（其余 actuator 端点仍需登录） |
+
+### 工作流通知真实化 + 一致性修复
+
+| 文件 | 说明 |
+|------|------|
+| `erp-api/.../agent/workflow/AgentWorkflowService.java` | `notify_customer` 节点改为调用 `NotifierService.notifyAll`（飞书/钉钉/企微 Webhook），无渠道时降级为日志 |
+| `erp-api/.../agent/graph/CheckpointManager.java` | `saveCheckpoint` 串行化，消除节点并发保存时的 `MAX(version)+1` 竞态 |
+| `erp-api/.../agent/approval/ApprovalService.java` | `getApprovedApproval` 与 `isApproved` 共用同一套过滤（状态 + 过期 + 参数摘要） |
+| `erp-api/.../agent/gateway/ToolGateway.java` | 回写审批状态时传入当前参数，保证命中的是同一张审批单 |
+
+### 工程化与代码卫生
+
+| 文件 | 说明 |
+|------|------|
+| `.github/workflows/ci.yml` | 新增 GitHub Actions：`mvn -B -pl erp-api -am test`（单元测试，集成测试默认排除） |
+| `service/.../service/statemachine/**` | 删除与新状态机重复的历史遗留状态机包（7 个类 + 3 个单测 + 1 个集成测试） |
+| `erp-api/src/test/.../KnowledgeToolsTest.java` | 新增知识检索工具单测（空结果提示、租户透传、引用格式化） |
+| `docs/AI-AGENT-IMPLEMENTATION.md` | 已知限制按事实更新（RAG 已接入对话、监控已接 Prometheus、记忆仍为 KV、DAG 为自研实现等） |
+
+**验证**：`mvn -pl erp-api -am test` 全量单元测试通过。
+
+---
+
 ## [Week2-3 加固] 2026-10-12 — 工具网关审计接入 + 策略注解 + 编译修复
 
 **对应方案进度**：第一阶段 Week2-3「工具权限与审计系统」加固

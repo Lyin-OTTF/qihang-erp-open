@@ -35,6 +35,15 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
+        <!-- Actuator + Micrometer：把工具调用指标真正暴露为 /actuator/prometheus -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
         <!-- Flyway 数据库版本迁移：Boot 4.x 自动配置已模块化，必须使用 starter（含 spring-boot-flyway + flyway-core）；
              仅声明 flyway-core 时 FlywayAutoConfiguration 不会被加载，迁移不会执行。 -->
         <dependency>
@@ -118,6 +127,11 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-deepseek</artifactId>
+        </dependency>
+        <!-- 本地 Ollama Embedding（无需云 API Key，默认 bge-m3 1024 维） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-ollama</artifactId>
         </dependency>
         <!-- PGVector 向量存储（已启用） -->
         <dependency>

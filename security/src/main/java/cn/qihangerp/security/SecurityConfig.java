@@ -89,6 +89,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/ai/brief").permitAll()
                         // 允许 SpringMVC 的默认错误地址匿名访问
                         .requestMatchers("/error").permitAll()
+                        // 监控端点：仅放行健康检查与 Prometheus 抓取，其余 actuator 端点仍需登录
+                        .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/prometheus").permitAll()
                         // 其他所有接口必须有Authority信息，Authority在登录成功后的UserDetailsImpl对象中默认设置"ROLE_USER"
                         //.requestMatchers("/**").hasAnyAuthority("ROLE_USER")
                         // 允许任意请求被已登录用户访问，不检查Authority

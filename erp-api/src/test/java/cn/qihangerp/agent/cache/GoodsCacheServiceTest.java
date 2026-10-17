@@ -31,6 +31,10 @@ class GoodsCacheServiceTest {
     @BeforeAll
     static void setup() {
         LettuceConnectionFactory factory = new LettuceConnectionFactory("127.0.0.1", 6379);
+        String redisPassword = System.getenv().getOrDefault("REDIS_PASSWORD", "");
+        if (!redisPassword.isBlank()) {
+            factory.setPassword(redisPassword);
+        }
         factory.afterPropertiesSet();
         redisTemplate = new StringRedisTemplate(factory);
         objectMapper = new ObjectMapper();

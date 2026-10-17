@@ -92,6 +92,20 @@ createdb erp_vector
 psql -d erp_vector -c "CREATE EXTENSION vector;"
 ```
 
+### 3.4 本地 Embedding 模型（Ollama，推荐）
+
+向量检索需要 Embedding 模型。默认走本地 Ollama，**不需要任何云 API Key**：
+
+```bash
+# 1. 安装并启动 Ollama（https://ollama.com）
+# 2. 拉取中文效果较好的 embedding 模型（1024 维，与 vector_store 表一致）
+ollama pull bge-m3
+# 3. 验证（应返回 1024 维向量）
+curl http://localhost:11434/api/embed -d '{"model":"bge-m3","input":"测试"}'
+```
+
+切换回阿里云百炼时：设 `EMBEDDING_PROVIDER=openai` + `OPENAI_EMBEDDING_ENABLED=true` + `DASHSCOPE_API_KEY`。
+
 ---
 
 ## 四、配置环境变量
@@ -143,6 +157,14 @@ export PGVECTOR_PASSWORD="你的PostgreSQL密码"
 # 阿里云百炼DashScope（Embedding向量化，不设置则RAG降级）
 export DASHSCOPE_API_KEY="sk-你的DashScope密钥"
 
+# 本地 Embedding（推荐，默认走 Ollama，无需云 Key）
+export EMBEDDING_PROVIDER="ollama"        # 想用百炼就设成 openai
+export OLLAMA_BASE_URL="http://localhost:11434"
+export OLLAMA_EMBEDDING_MODEL="bge-m3"    # 1024 维，与 vector_store 表维度一致
+
+# 向量存储开关（默认 false；需要 RAG 向量检索时设为 true）
+export AGENT_VECTOR_STORE_ENABLED="true"
+
 # Redis密码（本地无密码可不设）
 export REDIS_PASSWORD="你的Redis密码"
 
@@ -178,6 +200,31 @@ DASHSCOPE_API_KEY=sk-你的DashScope密钥
 ```
 
 > IDEA 中可安装 EnvFile 插件，启动时自动加载 .env 文件。
+
+### 4.4 本机密钥文件（可选，推荐）
+
+不想每次设置环境变量时，可以在**仓库根目录**创建 `application-local.yml`（已在 `.gitignore` 中，不会提交，也不会打进 jar）：
+
+```yaml
+spring:
+  datasource:
+    username: root
+    password: 你的MySQL密码
+  data:
+    redis:
+      password: 你的Redis密码
+
+token:
+  secret: 你的JWT密钥
+
+agent:
+  vector-store:
+    enabled: true
+    password: 你的PostgreSQL密码
+```
+
+`application-agent.yml` 通过 `spring.config.import: optional:file:./application-local.yml` 加载它；
+部署环境没有该文件时自动忽略，继续使用环境变量。
 
 ---
 
@@ -218,6 +265,66 @@ Started ErpApi in X.XXX seconds
 ```
 http://localhost:6149/
 ```
+
+### 5.4 监控端点（Micrometer / Prometheus）
+
+工具调用指标同时写入 Micrometer，可通过 Actuator 暴露给 Prometheus：
+
+```
+http://localhost:6149/actuator/health      # 健康检查（匿名可访问）
+http://localhost:6149/actuator/prometheus  # Prometheus 抓取（匿名可访问）
+```
+
+抓取到的关键指标：
+
+| 指标 | 说明 |
+|------|------|
+| `agent_tool_calls_total{tool,result}` | 各工具调用次数（success/failure） |
+| `agent_tool_duration_seconds{tool}` | 工具执行耗时（含 P50/P95/P99 分位） |
+| `agent_tool_errors_total{tool,error}` | 按错误类型统计的失败次数 |
+
+其余 actuator 端点（如 `/actuator/metrics`）仍需登录态访问，避免信息泄露。
+
+Grafana 面板：导入 `erp-api/src/main/resources/grafana/agent-metrics-dashboard.json`，
+在导入向导里选择 Prometheus 数据源即可。面板包含 8 项：全局成功率、平均执行耗时、
+总调用次数、总失败次数、各工具调用量（成功/失败）、工具性能明细表、失败分布、各工具 P95 耗时。
+
+### 5.5 测试
+
+```bash
+# 单元测试（默认，不需要外部依赖；CI 会跑这一档）
+mvn -pl erp-api -am test
+
+# 仅集成测试（需要本机 MySQL:127.0.0.1:3306 + Redis:127.0.0.1:6379）
+mvn -pl erp-api -am test -Pintegration-tests
+
+# 全量测试（单元 + 集成）
+mvn -pl erp-api -am test -Pall-tests
+```
+
+集成测试的默认连接参数（与 `InventoryConcurrencyTest`/`RagEvaluationRealRunTest` 等一致）：
+
+- MySQL：`127.0.0.1:3306`，库 `qihang-erp`，用户/口令从 `MYSQL_USERNAME`/`MYSQL_PASSWORD` 读取（未设置时回退 `root/1234`）
+- Redis：`127.0.0.1:6379`，口令从 `REDIS_PASSWORD` 读取（未设置时无密码）
+- PGVector：口令从 `PGVECTOR_PASSWORD` 读取（未设置时回退 `1234`）
+
+```bash
+export MYSQL_PASSWORD="你的MySQL密码"
+export REDIS_PASSWORD="你的Redis密码"
+export PGVECTOR_PASSWORD="你的PostgreSQL密码"
+```
+
+如果是全新环境，先准备基线数据再跑集成测试：
+
+```bash
+mysql -h127.0.0.1 -uroot -p"$MYSQL_PASSWORD" --default-character-set=utf8mb4 < docs/qihang-erp.sql
+for f in $(ls erp-api/src/main/resources/db/migration/V1_*.sql | sort -V); do
+  mysql -h127.0.0.1 -uroot -p"$MYSQL_PASSWORD" --default-character-set=utf8mb4 qihang-erp < "$f"
+done
+```
+
+CI（`.github/workflows/ci.yml`）包含两个 Job：`unit-tests` 直接跑单元测试；
+`integration-tests` 用 MySQL/Redis service container 建库并跑 `-Pall-tests`。
 
 ---
 

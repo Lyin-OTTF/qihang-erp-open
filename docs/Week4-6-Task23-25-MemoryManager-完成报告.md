@@ -387,7 +387,7 @@ spring:
     redis:
       host: localhost
       port: 6379
-      password: qihang123456
+      password: ${REDIS_PASSWORD:}
 ```
 
 ### 11.3 Docker部署
