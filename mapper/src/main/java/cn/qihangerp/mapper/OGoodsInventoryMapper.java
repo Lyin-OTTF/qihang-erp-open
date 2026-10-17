@@ -14,8 +14,8 @@ import org.apache.ibatis.annotations.Update;
 public interface OGoodsInventoryMapper extends BaseMapper<OGoodsInventory> {
 
     /**
-     * 原子条件扣减库存：仅当 quantity >= 扣减量时才执行，避免超卖。
-     * 一条SQL完成"判断+扣减"，消除先查后写的竞态窗口。
+     * 原子条件扣减库存：总库存和可用库存都充足时才执行，避免超卖。
+     * 一条SQL完成"判断+扣减+版本递增"，消除先查后写的竞态窗口。
      *
      * @param id         库存ID
      * @param quantity   扣减数量（正数）
@@ -23,8 +23,12 @@ public interface OGoodsInventoryMapper extends BaseMapper<OGoodsInventory> {
      */
     @Update("UPDATE o_goods_inventory " +
             "SET quantity = quantity - #{quantity}, " +
-            "    available_quantity = available_quantity - #{quantity} " +
-            "WHERE id = #{id} AND quantity >= #{quantity}")
+            "    available_quantity = available_quantity - #{quantity}, " +
+            "    version = version + 1 " +
+            "WHERE id = #{id} " +
+            "  AND is_delete = 0 " +
+            "  AND quantity >= #{quantity} " +
+            "  AND available_quantity >= #{quantity}")
     int deductStockAtomic(@Param("id") Long id, @Param("quantity") Integer quantity);
 
     /**
@@ -32,7 +36,32 @@ public interface OGoodsInventoryMapper extends BaseMapper<OGoodsInventory> {
      */
     @Update("UPDATE o_goods_inventory " +
             "SET quantity = quantity + #{quantity}, " +
-            "    available_quantity = available_quantity + #{quantity} " +
-            "WHERE id = #{id}")
+            "    available_quantity = available_quantity + #{quantity}, " +
+            "    version = version + 1 " +
+            "WHERE id = #{id} AND is_delete = 0")
     int addStockAtomic(@Param("id") Long id, @Param("quantity") Integer quantity);
+
+    /**
+     * 原子锁定库存：可用库存充足时同时增加锁定量、减少可用量。
+     */
+    @Update("UPDATE o_goods_inventory " +
+            "SET locked_quantity = locked_quantity + #{quantity}, " +
+            "    available_quantity = available_quantity - #{quantity}, " +
+            "    version = version + 1 " +
+            "WHERE id = #{id} " +
+            "  AND is_delete = 0 " +
+            "  AND available_quantity >= #{quantity}")
+    int lockStockAtomic(@Param("id") Long id, @Param("quantity") Integer quantity);
+
+    /**
+     * 原子解锁库存：已锁定量充足时同时减少锁定量、增加可用量。
+     */
+    @Update("UPDATE o_goods_inventory " +
+            "SET locked_quantity = locked_quantity - #{quantity}, " +
+            "    available_quantity = available_quantity + #{quantity}, " +
+            "    version = version + 1 " +
+            "WHERE id = #{id} " +
+            "  AND is_delete = 0 " +
+            "  AND locked_quantity >= #{quantity}")
+    int unlockStockAtomic(@Param("id") Long id, @Param("quantity") Integer quantity);
 }

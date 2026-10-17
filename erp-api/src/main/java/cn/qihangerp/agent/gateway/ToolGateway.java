@@ -175,10 +175,12 @@ public class ToolGateway {
                 if (!context.isApproved()) {
                     // 检查是否已有通过的审批（同一traceId+toolName+参数摘要，且未过期）
                     boolean alreadyApproved = approvalService != null
-                            && approvalService.isApproved(context.getTraceId(), toolName, args);
+                            && approvalService.isApproved(
+                                    context.getTraceId(), toolName, context.getMerchantId(), args);
                     if (alreadyApproved) {
                         log.info("Tool[{}]已有审批通过记录，直接执行", toolName);
-                        ApprovalRequest approved = approvalService.getApprovedApproval(context.getTraceId(), toolName, args);
+                        ApprovalRequest approved = approvalService.getApprovedApproval(
+                                context.getTraceId(), toolName, context.getMerchantId(), args);
                         if (approved != null) {
                             context.setApprovalId(approved.getId());
                             context.setApproved(true);

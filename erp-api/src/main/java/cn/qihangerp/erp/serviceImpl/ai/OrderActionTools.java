@@ -66,10 +66,11 @@ public class OrderActionTools {
             return "操作失败：订单不存在或不属于当前租户（orderId=" + orderId + "）";
         }
 
-        // 只更新备注字段，构造仅含 id + sellerMemo 的实体
+        // 使用读取到的版本号参与乐观锁更新，避免覆盖并发修改
         ShopOrder update = new ShopOrder();
         update.setId(orderId);
         update.setSellerMemo(memo);
+        update.setVersion(existing.getVersion());
         boolean success = orderService.updateById(update);
 
         if (success) {
@@ -124,6 +125,7 @@ public class OrderActionTools {
         ShopOrder update = new ShopOrder();
         update.setId(orderId);
         update.setOrderStatus(11);
+        update.setVersion(existing.getVersion());
         boolean success = orderService.updateById(update);
 
         if (success) {

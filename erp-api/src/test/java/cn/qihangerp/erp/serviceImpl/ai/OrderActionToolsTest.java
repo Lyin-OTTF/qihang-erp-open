@@ -80,6 +80,7 @@ class OrderActionToolsTest {
         existing.setId(100L);
         existing.setMerchantId(500L);
         existing.setSellerMemo("旧备注");
+        existing.setVersion(7);
 
         AtomicReference<ShopOrder> captured = new AtomicReference<>();
         AtomicBoolean updateCalled = new AtomicBoolean(false);
@@ -97,6 +98,7 @@ class OrderActionToolsTest {
         assertNotNull(updateEntity);
         assertEquals(100L, updateEntity.getId(), "更新实体应携带正确的订单ID");
         assertEquals("新的商家备注", updateEntity.getSellerMemo(), "应更新为新备注");
+        assertEquals(7, updateEntity.getVersion(), "更新实体应携带读取到的乐观锁版本号");
         // 关键：只更新了 id 和 sellerMemo，其他字段为 null（MyBatis-Plus 只更新非null字段）
         assertNull(updateEntity.getOrderStatus(), "不应携带 orderStatus（避免误更新）");
         assertNull(updateEntity.getOrderAmount(), "不应携带 orderAmount（避免误更新）");
@@ -108,6 +110,7 @@ class OrderActionToolsTest {
         // 订单属于租户500，但当前租户是999
         ShopOrder existing = new ShopOrder();
         existing.setId(100L);
+        existing.setVersion(1);
         existing.setMerchantId(500L);
 
         AtomicReference<ShopOrder> captured = new AtomicReference<>();

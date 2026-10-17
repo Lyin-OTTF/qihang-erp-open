@@ -37,6 +37,7 @@ class StateMachineTest {
         assertTrue(OrderStateMachine.canTransition(0, 21));
         assertTrue(OrderStateMachine.canTransition(0, 1));
         assertTrue(OrderStateMachine.canTransition(0, 11));
+        assertTrue(OrderStateMachine.canTransition(0, 12));
 
         assertTrue(OrderStateMachine.canTransition(21, 1));
         assertTrue(OrderStateMachine.canTransition(21, 11));
@@ -56,6 +57,10 @@ class StateMachineTest {
         assertTrue(OrderStateMachine.canTransition(12, 3));
         assertTrue(OrderStateMachine.canTransition(12, 13));
         assertTrue(OrderStateMachine.canTransition(12, 11));
+        assertTrue(OrderStateMachine.canTransition(12, 1));
+        assertTrue(OrderStateMachine.canTransition(12, 2));
+
+        assertTrue(OrderStateMachine.canTransition(3, 12));
 
         assertTrue(OrderStateMachine.canTransition(22, 1));
         assertTrue(OrderStateMachine.canTransition(22, 11));
@@ -130,7 +135,8 @@ class StateMachineTest {
         assertEquals(4, fromPending.size());
 
         Set<Integer> fromCompleted = OrderStateMachine.getAllowedTransitions(3);
-        assertTrue(fromCompleted.isEmpty());
+        assertTrue(fromCompleted.contains(12));
+        assertEquals(1, fromCompleted.size());
     }
 
     // ==================== 售后状态机 ====================

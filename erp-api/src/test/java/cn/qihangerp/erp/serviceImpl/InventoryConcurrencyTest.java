@@ -281,4 +281,63 @@ class InventoryConcurrencyTest {
             }
         }
     }
+
+    /**
+     * 存在锁定量时，扣减和加锁都必须以available_quantity为边界，并递增版本号。
+     */
+    @Test
+    void testAvailableQuantityGuardAndAtomicLockUnlock() throws Exception {
+        String sku = "LOCK-" + System.currentTimeMillis();
+        Long invId;
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            OGoodsInventoryMapper mapper = session.getMapper(OGoodsInventoryMapper.class);
+            OGoodsInventory inv = new OGoodsInventory();
+            inv.setGoodsId(999003L);
+            inv.setSkuId(999003L);
+            inv.setSkuCode(sku);
+            inv.setGoodsName("锁定量测试商品");
+            inv.setQuantity(10);
+            inv.setLockedQuantity(8);
+            inv.setAvailableQuantity(2);
+            inv.setWarehouseId(1L);
+            inv.setMerchantId(1L);
+            inv.setIsDelete(0);
+            inv.setVersion(1);
+            inv.setCreateTime(LocalDateTime.now());
+            inv.setUpdateTime(LocalDateTime.now());
+            mapper.insert(inv);
+            invId = inv.getId();
+        }
+
+        try (SqlSession session = sqlSessionFactory.openSession(true)) {
+            OGoodsInventoryMapper invMapper = session.getMapper(OGoodsInventoryMapper.class);
+            OGoodsInventoryOperationMapper opMapper = session.getMapper(OGoodsInventoryOperationMapper.class);
+            OGoodsInventoryServiceImpl service = new OGoodsInventoryServiceImpl(opMapper);
+            setBaseMapper(service, invMapper);
+
+            assertFalse(service.deductStock(invId, 3), "可用库存仅2时不能扣减3");
+            OGoodsInventory afterFailedDeduct = invMapper.selectById(invId);
+            assertEquals(10, afterFailedDeduct.getQuantity());
+            assertEquals(2, afterFailedDeduct.getAvailableQuantity());
+            assertEquals(1, afterFailedDeduct.getVersion());
+
+            assertFalse(service.lockStock(invId, 3), "可用库存不足时不能锁定3");
+            assertTrue(service.lockStock(invId, 2), "可用库存为2时应成功锁定2");
+            OGoodsInventory afterLock = invMapper.selectById(invId);
+            assertEquals(10, afterLock.getLockedQuantity());
+            assertEquals(0, afterLock.getAvailableQuantity());
+            assertEquals(2, afterLock.getVersion());
+
+            assertFalse(service.lockStock(invId, -11), "已锁定量不足时不能解锁11");
+            assertTrue(service.lockStock(invId, -2), "应成功解锁2");
+            OGoodsInventory afterUnlock = invMapper.selectById(invId);
+            assertEquals(8, afterUnlock.getLockedQuantity());
+            assertEquals(2, afterUnlock.getAvailableQuantity());
+            assertEquals(3, afterUnlock.getVersion());
+
+            opMapper.delete(new LambdaQueryWrapper<OGoodsInventoryOperation>()
+                    .eq(OGoodsInventoryOperation::getInventoryDetailId, invId));
+            invMapper.deleteById(invId);
+        }
+    }
 }
