@@ -1,6 +1,7 @@
 package cn.qihangerp.service.impl;
 
 import cn.qihangerp.common.*;
+import cn.qihangerp.model.bo.InventoryChangeCommand;
 import cn.qihangerp.model.entity.*;
 import cn.qihangerp.model.request.*;
 import cn.qihangerp.service.*;
@@ -216,9 +217,11 @@ public class ErpStockInServiceImpl extends ServiceImpl<ErpStockInMapper, ErpStoc
                 inv.setGoodsName(oGoodsSku.getGoodsName());
                 inv.setSkuName(oGoodsSku.getSkuName());
                 inv.setGoodsImg(oGoodsSku.getColorImage());
-                inv.setQuantity(item.getIntoQuantity());
+                // 余额由流水驱动：新库存记录从 0 起算，入库量通过 changeStock 记账，
+                // 保证"每一分库存都有对应流水"，对账才有账可对
+                inv.setQuantity(0);
                 inv.setLockedQuantity(0);
-                inv.setAvailableQuantity(item.getIntoQuantity());
+                inv.setAvailableQuantity(0);
                 inv.setStockStatus(1);
                 inv.setIsDelete(0);
                 inv.setCreateBy(userName);
@@ -226,9 +229,10 @@ public class ErpStockInServiceImpl extends ServiceImpl<ErpStockInMapper, ErpStoc
                 oGoodsInventoryService.save(inv);
                 goodsInventoryId = inv.getId();
             } else {
-                oGoodsInventoryService.addStock(invList.get(0).getId(), item.getIntoQuantity());
                 goodsInventoryId = invList.get(0).getId();
             }
+            // 入库统一走 changeStock：原子加库存 + 同事务写流水（含入库单号与幂等键）
+            applyStockIn(goodsInventoryId, item.getIntoQuantity(), erpStockIn, stockInItem, userName);
 
             // 增加商品库存批次表
             OGoodsInventoryBatch batch = new OGoodsInventoryBatch();
@@ -323,9 +327,9 @@ public class ErpStockInServiceImpl extends ServiceImpl<ErpStockInMapper, ErpStoc
             inv.setGoodsName(oGoodsSku.getGoodsName());
             inv.setSkuName(oGoodsSku.getSkuName());
             inv.setGoodsImg(oGoodsSku.getColorImage());
-            inv.setQuantity(request.getIntoQuantity());
+            inv.setQuantity(0);
             inv.setLockedQuantity(0);
-            inv.setAvailableQuantity(request.getIntoQuantity());
+            inv.setAvailableQuantity(0);
             inv.setStockStatus(1);
             inv.setIsDelete(0);
             inv.setCreateBy(userName);
@@ -333,9 +337,10 @@ public class ErpStockInServiceImpl extends ServiceImpl<ErpStockInMapper, ErpStoc
             oGoodsInventoryService.save(inv);
             goodsInventoryId = inv.getId();
         } else {
-            oGoodsInventoryService.addStock(invList.get(0).getId(), request.getIntoQuantity());
             goodsInventoryId = invList.get(0).getId();
         }
+        // 入库统一走 changeStock：原子加库存 + 同事务写流水（含入库单号与幂等键）
+        applyStockIn(goodsInventoryId, request.getIntoQuantity(), erpStockIn, stockInItem, userName);
 
         // 增加商品库存批次表 OGoodsInventoryBatch
         OGoodsInventoryBatch inventoryBatch = new OGoodsInventoryBatch();
@@ -448,9 +453,9 @@ public class ErpStockInServiceImpl extends ServiceImpl<ErpStockInMapper, ErpStoc
                 inv.setGoodsName(oGoodsSku.getGoodsName());
                 inv.setSkuName(oGoodsSku.getSkuName());
                 inv.setGoodsImg(oGoodsSku.getColorImage());
-                inv.setQuantity(intoQty);
+                inv.setQuantity(0);
                 inv.setLockedQuantity(0);
-                inv.setAvailableQuantity(intoQty);
+                inv.setAvailableQuantity(0);
                 inv.setStockStatus(1);
                 inv.setIsDelete(0);
                 inv.setCreateBy(userName);
@@ -458,9 +463,10 @@ public class ErpStockInServiceImpl extends ServiceImpl<ErpStockInMapper, ErpStoc
                 oGoodsInventoryService.save(inv);
                 goodsInventoryId = inv.getId();
             } else {
-                oGoodsInventoryService.addStock(invList.get(0).getId(), intoQty);
                 goodsInventoryId = invList.get(0).getId();
             }
+            // 入库统一走 changeStock：原子加库存 + 同事务写流水（含入库单号与幂等键）
+            applyStockIn(goodsInventoryId, intoQty, erpStockIn, stockInItem, userName);
 
             // 增加商品库存批次表 OGoodsInventoryBatch
             if(stockInItem.getInventoryMode()==0) {
@@ -554,6 +560,42 @@ public class ErpStockInServiceImpl extends ServiceImpl<ErpStockInMapper, ErpStoc
             return erpStockIn;
         }else
             return null;
+    }
+
+    /**
+     * 入库记库存：原子增加库存 + 同事务写流水。
+     *
+     * <p>流水带上入库单号、明细ID、商户与幂等键，"入库单 → 库存变动 → 流水"三者可互相追溯；
+     * 同一明细的同一累计入库量重复提交时会命中幂等键，不会重复加库存。</p>
+     *
+     * @param inventoryId 库存记录ID
+     * @param qty         本次入库数量
+     * @param stockIn     入库单（提供单号/商户/仓库）
+     * @param item        入库明细（提供明细ID与累计入库量）
+     * @param userName    操作人
+     */
+    private void applyStockIn(Long inventoryId, Integer qty, ErpStockIn stockIn,
+                              ErpStockInItem item, String userName) {
+        if (inventoryId == null || qty == null || qty <= 0) {
+            return;
+        }
+        InventoryChangeCommand cmd = InventoryChangeCommand.of(inventoryId, qty,
+                InventoryChangeCommand.TYPE_IN);
+        cmd.setBizType(stockIn.getStockInType() != null && stockIn.getStockInType() == 2
+                ? InventoryChangeCommand.BIZ_RETURN_IN
+                : InventoryChangeCommand.BIZ_PURCHASE_IN);
+        cmd.setBizId(stockIn.getId());
+        cmd.setBizNum(stockIn.getStockInNum());
+        cmd.setBizItemId(item.getId());
+        cmd.setMerchantId(stockIn.getMerchantId());
+        cmd.setWarehouseId(stockIn.getWarehouseId());
+        cmd.setOperator(userName);
+        int accumulated = (item.getInQuantity() == null ? 0 : item.getInQuantity()) + qty;
+        cmd.setIdempotencyKey("IN_ITEM:" + item.getId() + ":" + accumulated);
+        cmd.setRemark("入库单 " + stockIn.getStockInNum());
+        if (!oGoodsInventoryService.changeStock(cmd)) {
+            throw new ServiceException("增加库存失败：库存记录 " + inventoryId);
+        }
     }
 
 }

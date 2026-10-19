@@ -64,4 +64,28 @@ public interface OGoodsInventoryMapper extends BaseMapper<OGoodsInventory> {
             "  AND is_delete = 0 " +
             "  AND locked_quantity >= #{quantity}")
     int unlockStockAtomic(@Param("id") Long id, @Param("quantity") Integer quantity);
+
+    /**
+     * 原子调整库存（delta 可为负），用于对账补偿等"非业务单据"场景。
+     * 调整后总库存与可用库存均不得为负，否则不执行。
+     */
+    @Update("UPDATE o_goods_inventory " +
+            "SET quantity = quantity + #{delta}, " +
+            "    available_quantity = available_quantity + #{delta}, " +
+            "    version = version + 1 " +
+            "WHERE id = #{id} " +
+            "  AND is_delete = 0 " +
+            "  AND quantity + #{delta} >= 0 " +
+            "  AND available_quantity + #{delta} >= 0")
+    int adjustQtyAtomic(@Param("id") Long id, @Param("delta") Integer delta);
+
+    /**
+     * 把可用库存重算为 quantity - locked_quantity。
+     * 只修正派生列，不改动总库存与锁定量，属于对账补偿中的"安全修复"。
+     */
+    @Update("UPDATE o_goods_inventory " +
+            "SET available_quantity = quantity - locked_quantity, " +
+            "    version = version + 1 " +
+            "WHERE id = #{id} AND is_delete = 0")
+    int syncAvailableQuantity(@Param("id") Long id);
 }

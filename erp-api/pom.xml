@@ -250,8 +250,9 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- 默认只跑单元测试；集成测试需外部依赖，真实LLM评测还会产生API费用 -->
-                    <excludedGroups>it,llm</excludedGroups>
+                    <!-- 默认只跑单元测试；集成测试需外部依赖，真实LLM评测还会产生API费用；
+                         压测基准（benchmark）耗时且需要 MySQL/Redis，默认不跑 -->
+                    <excludedGroups>it,llm,benchmark</excludedGroups>
                 </configuration>
             </plugin>
         </plugins>
@@ -274,6 +275,24 @@
                 </plugins>
             </build>
         </profile>
+        <!-- 运行压测基准：mvn -pl erp-api test -Pbenchmark-tests -Dtest=StockDeductBenchmarkTest -->
+        <profile>
+            <id>benchmark-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <groups>benchmark</groups>
+                            <excludedGroups combine.self="override"></excludedGroups>
+                            <forkCount>1</forkCount>
+                            <reuseForks>true</reuseForks>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <!-- 运行全部测试（单元+集成）：mvn -pl erp-api test -Pall-tests -->
         <profile>
             <id>all-tests</id>
@@ -283,7 +302,7 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
-                            <excludedGroups combine.self="override">llm</excludedGroups>
+                            <excludedGroups combine.self="override">llm,benchmark</excludedGroups>
                         </configuration>
                     </plugin>
                 </plugins>

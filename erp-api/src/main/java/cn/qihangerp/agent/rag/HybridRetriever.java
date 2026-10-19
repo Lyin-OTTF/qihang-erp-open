@@ -154,32 +154,38 @@ public class HybridRetriever {
      */
     private List<RetrievalResult> fuseWithRRF(List<RetrievalResult> vectorResults,
                                                List<RetrievalResult> bm25Results) {
+        Map<String, RetrievalResult> vectorMap = vectorResults.stream()
+                .collect(Collectors.toMap(
+                        RetrievalResult::getChunkId,
+                        result -> result,
+                        (first, ignored) -> first,
+                        LinkedHashMap::new));
+        Map<String, RetrievalResult> bm25Map = bm25Results.stream()
+                .collect(Collectors.toMap(
+                        RetrievalResult::getChunkId,
+                        result -> result,
+                        (first, ignored) -> first,
+                        LinkedHashMap::new));
+
         // 步骤1: 构建chunkId -> RRF分数的映射
         Map<String, Double> rrfScores = new HashMap<>();
-        Map<String, RetrievalResult> chunkMap = new HashMap<>();
 
         // 处理向量检索结果
         for (int i = 0; i < vectorResults.size(); i++) {
-            RetrievalResult result = vectorResults.get(i);
-            String chunkId = result.getChunkId();
+            String chunkId = vectorResults.get(i).getChunkId();
             int rank = i + 1; // 1-based排名
             double rrfScore = 1.0 / (RRF_K + rank);
 
             rrfScores.put(chunkId, rrfScores.getOrDefault(chunkId, 0.0) + rrfScore);
-            chunkMap.put(chunkId, result);
         }
 
         // 处理BM25检索结果
         for (int i = 0; i < bm25Results.size(); i++) {
-            RetrievalResult result = bm25Results.get(i);
-            String chunkId = result.getChunkId();
+            String chunkId = bm25Results.get(i).getChunkId();
             int rank = i + 1;
             double rrfScore = 1.0 / (RRF_K + rank);
 
             rrfScores.put(chunkId, rrfScores.getOrDefault(chunkId, 0.0) + rrfScore);
-            if (!chunkMap.containsKey(chunkId)) {
-                chunkMap.put(chunkId, result);
-            }
         }
 
         // 步骤2: 创建融合结果
@@ -187,22 +193,34 @@ public class HybridRetriever {
         for (Map.Entry<String, Double> entry : rrfScores.entrySet()) {
             String chunkId = entry.getKey();
             double rrfScore = entry.getValue();
-            RetrievalResult original = chunkMap.get(chunkId);
-
-            // 获取原始分数
-            Double vectorScore = original.getVectorScore();
-            Double bm25Score = original.getBm25Score();
+            RetrievalResult vectorResult = vectorMap.get(chunkId);
+            RetrievalResult bm25Result = bm25Map.get(chunkId);
+            RetrievalResult original = vectorResult != null ? vectorResult : bm25Result;
+            String docName = vectorResult != null && vectorResult.getDocName() != null
+                    ? vectorResult.getDocName()
+                    : bm25Result != null && bm25Result.getDocName() != null
+                    ? bm25Result.getDocName()
+                    : original.getDocName();
+            Map<String, Object> metadata = vectorResult != null && vectorResult.getMetadata() != null
+                    ? vectorResult.getMetadata()
+                    : bm25Result != null && bm25Result.getMetadata() != null
+                    ? bm25Result.getMetadata()
+                    : original.getMetadata();
+            double vectorScore = vectorResult != null && vectorResult.getVectorScore() != null
+                    ? vectorResult.getVectorScore() : 0.0;
+            double bm25Score = bm25Result != null && bm25Result.getBm25Score() != null
+                    ? bm25Result.getBm25Score() : 0.0;
 
             RetrievalResult fusedResult = RetrievalResult.createHybridResult(
                     chunkId,
                     original.getContent(),
-                    vectorScore != null ? vectorScore : 0.0,
-                    bm25Score != null ? bm25Score : 0.0,
+                    vectorScore,
+                    bm25Score,
                     rrfScore,
                     original.getDocId()
             );
-            fusedResult.setDocName(original.getDocName());
-            fusedResult.setMetadata(original.getMetadata());
+            fusedResult.setDocName(docName);
+            fusedResult.setMetadata(metadata);
 
             fusedResults.add(fusedResult);
         }

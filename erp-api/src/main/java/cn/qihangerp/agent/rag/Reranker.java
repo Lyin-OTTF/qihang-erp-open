@@ -15,13 +15,14 @@ import java.util.stream.Collectors;
  * 提升查询与文档的语义相关性。不调用外部 LLM，基于以下信号加权：
  * <ul>
  *   <li>查询词覆盖度：查询词在文档中出现的比例（越高越相关）</li>
+ *   <li>标题覆盖度与完整短语命中：提升标题或正文直接匹配的文档</li>
  *   <li>查询词位置：查询词出现在文档开头权重更高</li>
  *   <li>词频密度：查询词在文档中的密集程度</li>
- *   <li>原始分数：BM25 分数和 RRF 分数作为基础分</li>
+ *   <li>基础分数：向量相似度和 BM25 分数作为补充信号</li>
  * </ul>
  *
  * <p>配置项：agent.rag.rerank-enabled（是否启用）、
- * spring.ai.vectorstore.rag.rerank.top-n（重排序候选数，默认5）</p>
+ * spring.ai.rag.rerank.top-n（重排序候选数，默认20）</p>
  *
  * @author 回溯开发-RAG增强
  * @since 2026-10-14
@@ -37,7 +38,7 @@ public class Reranker {
     private boolean rerankEnabled;
 
     /** Rerank 候选数（取 RRF 融合后的前 N 个做重排序） */
-    @Value("${spring.ai.vectorstore.rag.rerank.top-n:5}")
+    @Value("${spring.ai.rag.rerank.top-n:20}")
     private int rerankTopN;
 
     /**
@@ -53,8 +54,8 @@ public class Reranker {
             return candidates;
         }
 
-        // 只取前 rerankTopN 个候选做重排序，后面的保持原顺序
-        int rerankCount = Math.min(rerankTopN, candidates.size());
+        // 默认对全部候选做重排序；配置值可用于限制候选数量。
+        int rerankCount = Math.min(Math.max(0, rerankTopN), candidates.size());
         List<RetrievalResult> toRerank = new ArrayList<>(candidates.subList(0, rerankCount));
         List<RetrievalResult> rest = new ArrayList<>(candidates.subList(rerankCount, candidates.size()));
 
@@ -65,7 +66,7 @@ public class Reranker {
 
         // 计算每个候选的重排序分数
         for (RetrievalResult result : toRerank) {
-            double rerankScore = calculateRerankScore(queryTerms, result);
+            double rerankScore = calculateRerankScore(query, queryTerms, result);
             result.setRerankScore(rerankScore);
         }
 
@@ -89,9 +90,9 @@ public class Reranker {
     /**
      * 计算重排序分数。
      *
-     * 分数 = 0.4 * 覆盖度 + 0.3 * 位置分 + 0.2 * 密度分 + 0.1 * 原始分归一化
+     * 综合正文覆盖、标题覆盖、短语命中、位置、密度、向量分和BM25分。
      */
-    private double calculateRerankScore(List<String> queryTerms, RetrievalResult result) {
+    private double calculateRerankScore(String query, List<String> queryTerms, RetrievalResult result) {
         String content = result.getContent() != null ? result.getContent().toLowerCase() : "";
         if (content.isEmpty()) {
             return 0.0;
@@ -111,25 +112,53 @@ public class Reranker {
         }
         double coverage = (double) matched / queryTerms.size();
 
-        // 2. 位置分（0-1）：第一个匹配词越靠前分数越高
+        // 2. 标题覆盖度
+        String title = result.getDocName() != null ? result.getDocName().toLowerCase() : "";
+        int titleMatched = 0;
+        for (String term : queryTerms) {
+            if (title.contains(term.toLowerCase())) {
+                titleMatched++;
+            }
+        }
+        double titleCoverage = (double) titleMatched / queryTerms.size();
+        String normalizedQuery = normalizePhrase(query);
+        String normalizedTitle = normalizePhrase(title);
+        double phraseBonus = !normalizedQuery.isEmpty()
+                && (normalizedTitle.contains(normalizedQuery)
+                || normalizePhrase(content).contains(normalizedQuery)) ? 1.0 : 0.0;
+
+        // 3. 位置分（0-1）：第一个匹配词越靠前分数越高
         double positionScore = 0.0;
         if (firstMatchPos < Integer.MAX_VALUE) {
             positionScore = Math.max(0, 1.0 - (double) firstMatchPos / Math.max(content.length(), 1));
         }
 
-        // 3. 密度分（0-1）：匹配词在文档中的密集程度
+        // 4. 密度分（0-1）：匹配词在文档中的密集程度
         double densityScore = 0.0;
         if (matched > 0) {
             double avgPos = (double) totalMatchPos / matched;
             densityScore = Math.max(0, 1.0 - avgPos / Math.max(content.length(), 1));
         }
 
-        // 4. 原始分归一化（BM25分数，0-1近似）
-        double rawScore = result.getBm25Score() != null ? result.getBm25Score() : 0.0;
-        double normalizedRaw = Math.min(1.0, rawScore / 10.0);  // BM25分数通常在0-10之间
+        // 5. 向量分与BM25分归一化
+        double semanticScore = result.getVectorScore() != null
+                ? Math.max(0.0, Math.min(1.0, result.getVectorScore())) : 0.0;
+        double lexicalScore = result.getBm25Score() != null
+                ? Math.max(0.0, Math.min(1.0, result.getBm25Score() / 10.0)) : 0.0;
 
         // 加权融合
-        return 0.4 * coverage + 0.3 * positionScore + 0.2 * densityScore + 0.1 * normalizedRaw;
+        return 0.32 * coverage
+                + 0.22 * titleCoverage
+                + 0.10 * phraseBonus
+                + 0.10 * positionScore
+                + 0.08 * densityScore
+                + 0.10 * semanticScore
+                + 0.08 * lexicalScore;
+    }
+
+    private String normalizePhrase(String text) {
+        return text == null ? "" : text.toLowerCase()
+                .replaceAll("[\\s\\p{Punct}，。！？；：、（）【】《》]+", "");
     }
 
     /**

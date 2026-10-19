@@ -1,6 +1,7 @@
 package cn.qihangerp.service.impl;
 
 import cn.qihangerp.common.*;
+import cn.qihangerp.model.bo.InventoryChangeCommand;
 import cn.qihangerp.model.entity.*;
 import cn.qihangerp.model.request.StockOutItemRequest;
 import cn.qihangerp.mapper.ErpStockOutMapper;
@@ -229,12 +230,14 @@ public class ErpStockOutServiceImpl extends ServiceImpl<ErpStockOutMapper, ErpSt
             if (batch.getCurrentQty().longValue() < request.getOutQty().longValue())
                 return ResultVo.error(1500, "库存不足");
 
-            // 1扣减批次库存
-            oGoodsInventoryBatchService.deductBatchStock(batch.getId(), request.getOutQty().intValue());
+            // 1扣减批次库存（原子条件更新：false 说明已被并发请求抢占，不能再出）
+            if (!oGoodsInventoryBatchService.deductBatchStock(batch.getId(), request.getOutQty().intValue())) {
+                throw new ServiceException("批次库存不足，请刷新后重试");
+            }
 
-            // 2扣减总库存
+            // 2扣减总库存 + 同事务写流水（带出库单/订单号与幂等键）
             if(batch.getInventoryId()!=null){
-                oGoodsInventoryService.deductStock(batch.getInventoryId(), request.getOutQty().intValue());
+                applyStockOut(batch.getInventoryId(), batch, request.getOutQty().intValue(), outItem, userName);
             }
 
             // 记录发货备货批次信息(出库类型：1 且 存在sourceOrderItemId)
@@ -297,16 +300,15 @@ public class ErpStockOutServiceImpl extends ServiceImpl<ErpStockOutMapper, ErpSt
                 int batchQty = batch.getCurrentQty();
                 int deductQuantity = Math.min(batchQty, shengyu);
                 if(batchQty>shengyu){
-                    OGoodsInventoryBatch updateBatch = new OGoodsInventoryBatch();
-                    updateBatch.setCurrentQty(batchQty - shengyu);
-                    updateBatch.setId(batch.getId());
-                    oGoodsInventoryBatchService.updateById(updateBatch);
+                    // 原子扣减：并发下若已被抢占则整体回滚，避免批次被重复扣减
+                    if (!oGoodsInventoryBatchService.deductBatchStock(batch.getId(), shengyu)) {
+                        throw new ServiceException("批次库存并发变化，请重试");
+                    }
                     shengyu=0;
                 }else{
-                    OGoodsInventoryBatch updateBatch = new OGoodsInventoryBatch();
-                    updateBatch.setCurrentQty(0);
-                    updateBatch.setId(batch.getId());
-                    oGoodsInventoryBatchService.updateById(updateBatch);
+                    if (!oGoodsInventoryBatchService.deductBatchStock(batch.getId(), batchQty)) {
+                        throw new ServiceException("批次库存并发变化，请重试");
+                    }
                     deductQuantity = batchQty;
                     shengyu=shengyu-batchQty;
                 }
@@ -347,8 +349,8 @@ public class ErpStockOutServiceImpl extends ServiceImpl<ErpStockOutMapper, ErpSt
 
                 }
             }
-            // 减少总库存
-            oGoodsInventoryService.deductStock(inventoryList.get(0).getId(), request.getOutQty().intValue());
+            // 减少总库存（原子条件扣减 + 同事务写流水，失败即回滚整笔出库）
+            applyStockOut(inventoryList.get(0).getId(), null, request.getOutQty().intValue(), outItem, userName);
         }
 
 
@@ -389,7 +391,60 @@ public class ErpStockOutServiceImpl extends ServiceImpl<ErpStockOutMapper, ErpSt
 
         return ResultVo.success(outItem.getEntryId());
     }
-    
+
+    /**
+     * 出库记库存：原子扣减 + 同事务写流水。
+     *
+     * <p>旧实现丢弃了 deductStock 的返回值，库存不足时业务照样往下走，
+     * 造成"出库成功但账面没扣"的账实不符。这里改为失败即抛异常回滚整笔事务。</p>
+     *
+     * @param inventoryId 库存记录ID
+     * @param batch       批次（可为 null，表示按 SKU+仓库整体出库）
+     * @param qty         出库数量
+     * @param outItem     出库明细（提供业务单号、商户、累计出库量）
+     * @param userName    操作人
+     */
+    private void applyStockOut(Long inventoryId, OGoodsInventoryBatch batch, Integer qty,
+                               ErpStockOutItem outItem, String userName) {
+        if (inventoryId == null || qty == null || qty <= 0) {
+            return;
+        }
+        InventoryChangeCommand cmd = InventoryChangeCommand.of(inventoryId, qty,
+                InventoryChangeCommand.TYPE_OUT);
+        if (batch != null) {
+            cmd.setBatchId(batch.getId());
+            cmd.setBatchNum(batch.getBatchNum());
+        }
+        cmd.setBizType(outBizType(outItem.getType()));
+        cmd.setBizId(outItem.getEntryId());
+        cmd.setBizNum(outItem.getSourceOrderNum());
+        cmd.setBizItemId(outItem.getId());
+        cmd.setMerchantId(outItem.getMerchantId());
+        cmd.setWarehouseId(outItem.getWarehouseId());
+        cmd.setOperator(userName);
+        int accumulated = (outItem.getOutQuantity() == null ? 0 : outItem.getOutQuantity()) + qty;
+        cmd.setIdempotencyKey("OUT_ITEM:" + outItem.getId() + ":" + accumulated);
+        cmd.setRemark("出库明细 " + outItem.getId());
+        if (!oGoodsInventoryService.changeStock(cmd)) {
+            throw new ServiceException("总库存不足，出库失败");
+        }
+    }
+
+    /**
+     * 出库类型 → 流水业务类型映射。
+     */
+    private int outBizType(Integer outType) {
+        if (outType == null) {
+            return InventoryChangeCommand.BIZ_OTHER;
+        }
+        return switch (outType) {
+            case 1 -> InventoryChangeCommand.BIZ_ORDER_OUT;
+            case 2 -> InventoryChangeCommand.BIZ_PURCHASE_RETURN;
+            case 3 -> InventoryChangeCommand.BIZ_STOCKTAKING;
+            case 4 -> InventoryChangeCommand.BIZ_DAMAGE_OUT;
+            default -> InventoryChangeCommand.BIZ_OTHER;
+        };
+    }
 
 }
 

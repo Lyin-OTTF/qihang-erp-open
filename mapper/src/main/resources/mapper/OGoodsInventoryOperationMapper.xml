@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="cn.qihangerp.mapper.OGoodsInventoryOperationMapper">
+
+    <resultMap id="FlowStatMap" type="cn.qihangerp.model.vo.InventoryFlowStat">
+        <result column="inventoryId" property="inventoryId"/>
+        <result column="flowCount" property="flowCount"/>
+        <result column="netQty" property="netQty"/>
+        <result column="firstBefore" property="firstBefore"/>
+        <result column="lastAfter" property="lastAfter"/>
+    </resultMap>
+
+    <!--
+      一次聚合出对账所需的全部指标：
+        netQty      : 净变动量（入库为正、出库为负、调整取原值；锁定/解锁不改总库存）
+        firstBefore : 首笔流水的变动前余额，用于校验"-首笔before + 净额 = 末笔after"
+        lastAfter   : 末笔流水的变动后余额，用于与库存表 quantity 做账实比对
+      注意：全部使用窗口函数（带 OVER），不能用普通聚合 + 非聚合列混选，
+            否则在 sql_mode=only_full_group_by 下会报错。
+      窗口函数需要 MySQL 8.0+，本仓库基线为 MySQL 8。
+    -->
+    <select id="selectFlowStats" resultMap="FlowStatMap">
+        SELECT t.inventory_detail_id AS inventoryId,
+               t.flowCount          AS flowCount,
+               t.netQty             AS netQty,
+               t.firstBefore        AS firstBefore,
+               t.lastAfter          AS lastAfter
+        FROM (
+            SELECT op.inventory_detail_id,
+                   COUNT(*) OVER (PARTITION BY op.inventory_detail_id) AS flowCount,
+                   SUM(CASE
+                           WHEN op.type = 1 THEN op.quantity
+                           WHEN op.type = 2 THEN -op.quantity
+                           WHEN op.type = 5 THEN op.quantity
+                           ELSE 0
+                       END) OVER (PARTITION BY op.inventory_detail_id) AS netQty,
+                   FIRST_VALUE(op.before_qty) OVER (
+                       PARTITION BY op.inventory_detail_id ORDER BY op.id ASC
+                   ) AS firstBefore,
+                   FIRST_VALUE(op.after_qty) OVER (
+                       PARTITION BY op.inventory_detail_id ORDER BY op.id DESC
+                   ) AS lastAfter,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY op.inventory_detail_id ORDER BY op.id ASC
+                   ) AS rn
+            FROM o_goods_inventory_operation op
+            WHERE op.status = 1
+            <if test="merchantId != null">
+                AND op.merchant_id = #{merchantId,jdbcType=BIGINT}
+            </if>
+            <if test="inventoryIds != null and inventoryIds.size() > 0">
+                AND op.inventory_detail_id IN
+                <foreach collection="inventoryIds" item="id" open="(" separator="," close=")">
+                    #{id}
+                </foreach>
+            </if>
+        ) t
+        WHERE t.rn = 1
+    </select>
+
+    <select id="countByInventory" resultType="long">
+        SELECT COUNT(*) FROM o_goods_inventory_operation
+        WHERE inventory_detail_id = #{inventoryId,jdbcType=BIGINT}
+    </select>
+
+</mapper>

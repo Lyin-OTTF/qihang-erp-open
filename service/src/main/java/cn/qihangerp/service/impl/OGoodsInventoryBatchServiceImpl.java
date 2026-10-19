@@ -13,6 +13,9 @@ import java.util.List;
 /**
  * 主系统商品库存批次 Service 实现
  *
+ * <p>批次扣减同样采用条件原子更新（UPDATE ... WHERE current_qty >= ?），
+ * 避免"先查后写"在并发出库时把同一批次重复扣减。</p>
+ *
  * @author qihang
  */
 @AllArgsConstructor
@@ -29,13 +32,20 @@ public class OGoodsInventoryBatchServiceImpl
 
     @Override
     public boolean deductBatchStock(Long batchId, Integer quantity) {
-        OGoodsInventoryBatch batch = this.getById(batchId);
-        if (batch == null || batch.getCurrentQty() < quantity) return false;
+        if (batchId == null || quantity == null || quantity <= 0) {
+            return false;
+        }
+        return baseMapper.deductQtyAtomic(batchId, quantity) > 0;
+    }
 
-        OGoodsInventoryBatch update = new OGoodsInventoryBatch();
-        update.setId(batchId);
-        update.setCurrentQty(batch.getCurrentQty() - quantity);
-        return this.updateById(update);
+    @Override
+    public boolean adjustBatchStock(Long batchId, Integer delta) {
+        if (batchId == null || delta == null || delta == 0) {
+            return false;
+        }
+        // deductQtyAtomic 的条件是 current_qty >= 传入数量：
+        // 传 -delta 即在 current_qty + delta >= 0 的前提下把 delta 加到批次上，正负皆可。
+        return baseMapper.deductQtyAtomic(batchId, -delta) > 0;
     }
 
     @Override

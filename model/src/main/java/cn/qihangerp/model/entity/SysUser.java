@@ -65,7 +65,14 @@ public class SysUser
     /** 用户头像 */
     private String avatar;
 
-    /** 密码 */
+    /**
+     * 密码（BCrypt 哈希）
+     *
+     * P0-2 修复：getInfo 等接口直接把 SysUser 序列化返回，密码哈希曾随响应泄露。
+     * 双注解覆盖两条序列化路径：Jackson（项目默认转换器）与 fastjson2。
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    @com.alibaba.fastjson2.annotation.JSONField(serialize = false)
     private String password;
 
     /** 帐号状态（0正常 1停用） */

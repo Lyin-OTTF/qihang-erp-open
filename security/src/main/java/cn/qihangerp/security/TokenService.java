@@ -37,7 +37,11 @@ public class TokenService
 //    private String header;
 
     // 令牌秘钥
-    @Value("${token.secret:'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkrstuvwxyzabcdefghijklmnopqrstuvwxyz'}")
+    // P0-4 修复：删除硬编码弱默认值。原默认值（一串 abc... 常量）在 token.secret 属性缺失时生效，
+    // 等于把签名密钥拱手让人；现要求必须由配置提供（application.yml 走 ${JWT_SECRET} 无默认值，
+    // 未设置时占位符解析失败直接启动报错，fail-fast），本地开发由 gitignore 的
+    // application-local.yml 注入真实密钥。
+    @Value("${token.secret}")
     private String secret;
 
     // 令牌有效期（默认30分钟）

@@ -175,10 +175,10 @@ public class ShopGoodsController extends BaseController {
     @PostMapping(value = "/sku/linkErp")
     public AjaxResult linkErp(@RequestBody LinkErpGoodsSkuBo bo) {
         if(StringUtils.isBlank(bo.getId())){
-            return AjaxResult.error(500,"缺少参数Id");
+            return AjaxResult.error(400,"缺少参数Id");
         }
         if(bo.getErpGoodsSkuId()==null){
-            return AjaxResult.error(500,"缺少参数erpGoodsSkuId");
+            return AjaxResult.error(400,"缺少参数erpGoodsSkuId");
         }
 
         ResultVo resultVo = skuService.linkErpGoodsSku(bo);
