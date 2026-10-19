@@ -49,7 +49,7 @@ class PgVectorStoreIntegrationTest {
     }
 
     @Test
-    void insertAndSearchThroughRealPgvector() {
+    void insertAndSearchThroughRealPgvector() throws Exception {
         JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource());
         try {
             jdbcTemplate.queryForObject("select 1", Integer.class);
@@ -57,12 +57,17 @@ class PgVectorStoreIntegrationTest {
             Assumptions.assumeTrue(false, "PGVector 不可达，跳过集成测试: " + e.getMessage());
         }
 
-        VectorStore vectorStore = PgVectorStore.builder(jdbcTemplate, new HashingEmbeddingModel())
+        PgVectorStore pgVectorStore = PgVectorStore.builder(jdbcTemplate, new HashingEmbeddingModel())
                 .dimensions(1024)
                 .distanceType(PgVectorStore.PgDistanceType.COSINE_DISTANCE)
                 .indexType(PgVectorStore.PgIndexType.HNSW)
                 .initializeSchema(true)
                 .build();
+        // 缺陷修复：builder 直接构建的实例不经过 Spring 容器生命周期，afterPropertiesSet()
+        // （真正执行建表的钩子）不会自动触发。本地开发库已有 vector_store 表所以侥幸通过，
+        // CI 上是全新空库，不显式初始化 schema 会导致 add/delete 全部报 relation does not exist。
+        pgVectorStore.afterPropertiesSet();
+        VectorStore vectorStore = pgVectorStore;
 
         String marker = "it-" + System.currentTimeMillis();
         try {
@@ -82,7 +87,13 @@ class PgVectorStoreIntegrationTest {
                     "最相关结果应为退货流程，实际: " + hits.get(0).getText());
             assertTrue(hits.get(0).getScore() != null, "pgvector 应返回相似度分数");
         } finally {
-            jdbcTemplate.update("delete from vector_store where metadata->>'src' = ?", marker);
+            // 清理失败（如建表失败导致主流程已抛异常）不应掩盖真实失败原因，故吞掉并留痕
+            try {
+                jdbcTemplate.update("delete from vector_store where metadata->>'src' = ?", marker);
+            } catch (Exception cleanupEx) {
+                System.err.println("[PgVectorStoreIntegrationTest] 清理 marker 数据失败（不掩盖主异常）: "
+                        + cleanupEx.getMessage());
+            }
         }
     }
 
