@@ -81,7 +81,7 @@ public class RefundController extends BaseController
 
     @PostMapping("/processing")
     public AjaxResult refundProcessing(@RequestBody RefundProcessingBo bo ) {
-        if (bo.getRefundId() == null) return AjaxResult.error(500, "缺少参数refundId");
+        if (bo.getRefundId() == null) return AjaxResult.error(400, "缺少参数refundId");
         ResultVo<Long> resultVo = refundService.refundProcessing(bo,getUsername());
         if(resultVo.getCode() == 0) return success();
         else return AjaxResult.error(resultVo.getMsg());

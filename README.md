@@ -592,6 +592,32 @@ location /prod-api/ {
 
 ---
 
+## 🧪 库存一致性、对账与压测
+
+本仓库对「库存流水：条件原子更新 + 同事务生成流水 + 定时对账」做了完整落地，并配了可复现的压测资产：
+
+| 主题 | 入口 |
+|------|------|
+| 设计说明与取舍（为什么补偿只调账、不改库存） | [`docs/库存流水与定时对账-实现说明.md`](docs/库存流水与定时对账-实现说明.md) |
+| 库存变动唯一入口（幂等 + 原子更新 + 同事务流水） | `OGoodsInventoryServiceImpl#changeStock` |
+| 五项对账校验 + 差异记录 + 告警 | `StockReconcileServiceImpl` / `StockReconcileJob` |
+| 差异查询与人工补偿接口 | `/api/erp-api/stockReconcile/**` |
+| 压测（Java 基准 / k6 / JMeter） | [`benchmark/README.md`](benchmark/README.md) |
+
+```bash
+# 压测：三组对照（旧实现 / 原子更新 / 原子更新+幂等），验证并发不超卖
+./benchmark/run-benchmark.sh          # Windows: .\benchmark\run-benchmark.ps1
+
+# 对账与并发用例
+mvn -pl erp-api -am test -Dtest=StockReconcileServiceTest
+mvn -pl erp-api -am test -Dtest=InventoryConcurrencyTest
+```
+
+结构变更由 Flyway 自动执行（`erp-api/src/main/resources/db/migration/V1_32_0__inventory_flow_and_reconcile.sql`）；
+已手工改过结构的库可改用幂等脚本 `docs/sql/migration_v4.2.0_stock_flow_reconcile.sql`。
+
+---
+
 ## 📦 启航电商开源生态
 
 启航电商旗下开源项目矩阵：

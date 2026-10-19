@@ -46,6 +46,7 @@ public class LlmEvaluationService {
     private final boolean llmEnabled;
     private final int timeoutSeconds;
     private final int contextLimit;
+    private final int maxAttempts;
 
     private volatile ChatClient cachedChatClient;
     private volatile String cachedModelName;
@@ -53,11 +54,13 @@ public class LlmEvaluationService {
     public LlmEvaluationService(AiConfigService aiConfigService,
                                 @Value("${agent.evaluation.llm-enabled:false}") boolean llmEnabled,
                                 @Value("${agent.evaluation.llm-timeout-seconds:60}") int timeoutSeconds,
-                                @Value("${agent.evaluation.context-limit:10}") int contextLimit) {
+                                @Value("${agent.evaluation.context-limit:10}") int contextLimit,
+                                @Value("${agent.evaluation.llm-max-attempts:3}") int maxAttempts) {
         this.aiConfigService = aiConfigService;
         this.llmEnabled = llmEnabled;
         this.timeoutSeconds = timeoutSeconds;
         this.contextLimit = Math.max(1, contextLimit);
+        this.maxAttempts = Math.max(1, maxAttempts);
     }
 
     public boolean isLlmEnabled() {
@@ -93,7 +96,7 @@ public class LlmEvaluationService {
                             "如果参考资料中没有相关信息，请回答\"根据现有资料无法确定\"，不要编造。\n\n" +
                             "参考资料：\n%s\n用户问题：%s\n请直接给出答案，不要重复问题。",
                     contextStr, question);
-            return client.prompt(prompt).call().content();
+            return callWithRetry(client, prompt, "生成答案");
         } catch (Exception e) {
             log.warn("LLM生成答案失败，降级为启发式: {}", e.getMessage());
             return null;
@@ -129,8 +132,23 @@ public class LlmEvaluationService {
                     generatedAnswer != null ? generatedAnswer : "（空答案）",
                     contextStr);
 
-            String response = client.prompt(prompt).call().content();
-            return parseScores(response);
+            Exception lastError = null;
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                try {
+                    String response = client.prompt(prompt).call().content();
+                    double[] scores = parseScores(response);
+                    if (scores != null) {
+                        return scores;
+                    }
+                    lastError = new IllegalStateException("无法解析裁判JSON");
+                } catch (Exception e) {
+                    lastError = e;
+                }
+                if (attempt < maxAttempts) {
+                    sleepBeforeRetry(attempt, "裁判打分");
+                }
+            }
+            throw lastError != null ? lastError : new IllegalStateException("裁判打分失败");
         } catch (Exception e) {
             log.warn("LLM裁判打分失败，降级为启发式: {}", e.getMessage());
             return null;
@@ -159,6 +177,36 @@ public class LlmEvaluationService {
 
     private double clamp(double v) {
         return Math.max(0.0, Math.min(1.0, v));
+    }
+
+    private String callWithRetry(ChatClient client, String prompt, String operation) {
+        Exception lastError = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            try {
+                String content = client.prompt(prompt).call().content();
+                if (content != null && !content.isBlank()) {
+                    return content;
+                }
+                lastError = new IllegalStateException(operation + "返回空内容");
+            } catch (Exception e) {
+                lastError = e;
+            }
+            if (attempt < maxAttempts) {
+                sleepBeforeRetry(attempt, operation);
+            }
+        }
+        throw new IllegalStateException(operation + "失败: " + lastError.getMessage(), lastError);
+    }
+
+    private void sleepBeforeRetry(int attempt, String operation) {
+        long delay = 500L * attempt;
+        log.warn("{}第{}次失败，{}ms后重试", operation, attempt, delay);
+        try {
+            Thread.sleep(delay);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(operation + "重试被中断", e);
+        }
     }
 
     /**

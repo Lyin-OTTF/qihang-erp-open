@@ -8,6 +8,7 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -25,6 +26,9 @@ import jakarta.servlet.DispatcherType;
 
 @Configuration
 @EnableWebSecurity
+// P0-1 修复：开启方法级安全，使控制器 @PreAuthorize("@ss.hasPermi(...)") 真正生效。
+// 此前未开启时注解从不被求值，接口级授权形同虚设（所有登录用户可调用全部管理接口）。
+@EnableMethodSecurity
 public class SecurityConfig {
 
     @Autowired
@@ -71,29 +75,32 @@ public class SecurityConfig {
                         // 允许所有OPTIONS请求
                         .requestMatchers("/home").permitAll()
                         .requestMatchers(HttpMethod.GET, "/favicon.ico").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/tao/order/get_detail").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/*/order/get_detail").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/refund/get_detail").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/images/preview/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/system/config/**").permitAll()
+                        // P0-3 修复：以下为历史遗留死规则（全仓库无对应 Controller 映射，
+                        // 仅此处放行），已删除，避免形成未登记的匿名入口：
+                        //   /tao/order/get_detail、/*/order/get_detail、/refund/get_detail、
+                        //   /images/preview/**、/system/config/**（无 /api/sys-api 前缀）
+                        // 真实的订单/退款详情接口位于 /api/erp-api/order/**、/api/erp-api/refund/**，
+                        // 由 @PreAuthorize 保护，统一走 anyRequest().authenticated()。
                         .requestMatchers(HttpMethod.GET, "/captchaImage").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/sys-api/captchaImage").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/sys-api/system/config/**").permitAll()
+                        // P0-3 修复：系统参数表(configValue)含密钥类配置，原 /** 通配可被匿名遍历。
+                        // 收窄为登录页标题所需的固定 key（前端登录页 getConfig('sys.name')）。
+                        .requestMatchers(HttpMethod.GET,
+                                "/api/sys-api/system/config/getConfigValue/sys.name",
+                                "/api/sys-api/system/config/configKey/sys.name").permitAll()
                         .requestMatchers("/pdd/oauth_callback").permitAll()
                         // 允许直接访问授权登录接口
                         .requestMatchers(HttpMethod.POST, "/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/sys-api/login").permitAll()
-                        // SSE 推送通知放行
-                        .requestMatchers("/api/erp-api/sse/notify_msg").permitAll()
-                        // AI简报接口放行
-                        .requestMatchers(HttpMethod.GET, "/api/ai/brief").permitAll()
+                        // P0-3 修复：SSE 推送与 AI 简报原为匿名放行。SSE 无任何鉴权即可
+                        // 接收全局广播（新订单提醒等）；AI 简报为内部经营数据。两者收回登录态，
+                        // 前端 EventSource 已带 ?token=...（TokenService.getToken 支持参数读取）。
                         // 允许 SpringMVC 的默认错误地址匿名访问
                         .requestMatchers("/error").permitAll()
                         // 监控端点：仅放行健康检查与 Prometheus 抓取，其余 actuator 端点仍需登录
                         .requestMatchers(HttpMethod.GET, "/actuator/health", "/actuator/prometheus").permitAll()
-                        // 其他所有接口必须有Authority信息，Authority在登录成功后的UserDetailsImpl对象中默认设置"ROLE_USER"
-                        //.requestMatchers("/**").hasAnyAuthority("ROLE_USER")
-                        // 允许任意请求被已登录用户访问，不检查Authority
+                        // 其他所有接口必须登录。接口级权限由 @EnableMethodSecurity +
+                        // @PreAuthorize("@ss.hasPermi(...)") 校验（P0-1 修复），不在此处展开。
                         .anyRequest().authenticated())
 
                 .authenticationProvider(authenticationProvider())
@@ -139,11 +146,18 @@ public class SecurityConfig {
 
     /**
      * CORS配置 - Spring Boot 4.1 / Spring Security 7.x 需要显式配置
+     *
+     * P1-1 修复：原 addAllowedOriginPattern("*") + setAllowCredentials(true) 是
+     * "任意源 + 携带凭据"的高危组合（任意网站可跨域携带用户 Token 调 API）。
+     * 现收缩为显式白名单：开发前端 vite dev server(88) 与后端(6149) 本机来源；
+     * 生产经 nginx 同源代理（/prod-api），不依赖 CORS。
      */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.addAllowedOriginPattern("*");
+        configuration.setAllowedOriginPatterns(java.util.List.of(
+                "http://localhost:6149", "http://127.0.0.1:6149",
+                "http://localhost:88", "http://127.0.0.1:88"));
         configuration.addAllowedMethod("*");
         configuration.addAllowedHeader("*");
         configuration.setAllowCredentials(true);

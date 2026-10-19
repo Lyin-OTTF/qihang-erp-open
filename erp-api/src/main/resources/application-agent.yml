@@ -79,7 +79,7 @@ spring:
         similarity-threshold: 0.7
       rerank:
         enabled: true
-        top-n: 5
+        top-n: 20
 
   # ============ Redis配置（会话记忆 + 分布式锁）============
   data:
@@ -157,6 +157,7 @@ agent:
     mrr-target: 0.7
     llm-enabled: false          # 真实LLM质量打分开关，开启后产生API费用且评测耗时变长
     llm-timeout-seconds: 60
+    llm-max-attempts: 3
     context-limit: 10           # 生成与裁判读取的检索上下文数量，应与评测TopK对齐
 
 # ============ 监控（Micrometer / Prometheus）============

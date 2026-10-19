@@ -44,16 +44,13 @@ public class SysLoginController
     @PostMapping("/api/sys-api/login")
     public AjaxResult login(@RequestBody LoginBody loginBody)
     {
-        try {
-            AjaxResult ajax = AjaxResult.success();
-            // 生成令牌
-            String token = loginService.login(loginBody.getUsername(), loginBody.getPassword(), loginBody.getCode(),
-                    loginBody.getUuid());
-            ajax.put(Constants.TOKEN, token);
-            return ajax;
-        }catch (Exception e){
-            return AjaxResult.error(500,e.getMessage());
-        }
+        AjaxResult ajax = AjaxResult.success();
+        // 生成令牌；登录失败（用户不存在/密码错误/验证码错误/账号锁定）由 GlobalExceptionHandler
+        // 收敛为面向用户的提示，内部异常（DB/第三方）仅记录日志、不向客户端泄露细节
+        String token = loginService.login(loginBody.getUsername(), loginBody.getPassword(), loginBody.getCode(),
+                loginBody.getUuid());
+        ajax.put(Constants.TOKEN, token);
+        return ajax;
     }
 
     /**

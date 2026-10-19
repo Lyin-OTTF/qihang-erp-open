@@ -18,7 +18,7 @@ spring:
       # 数据库索引
       database: 0
       # 密码
-      #    password: 123321
+      #    password: <your-redis-password>
       # 连接超时时间
       timeout: 10s
       lettuce:
@@ -113,4 +113,14 @@ deepseek:
 # Token 配置
 token:
   expireTime: 60       # Token 过期时间（分钟），默认30
-  secret: ${JWT_SECRET:}
+  # P0-4 修复：JWT_SECRET 未设置时启动即失败（占位符无默认值），不再回落到弱密钥/空串
+  secret: ${JWT_SECRET}
+
+# 库存对账配置
+erp:
+  stock:
+    reconcile:
+      # 是否启用定时对账（默认启用；本地调试可置 false）
+      enabled: true
+      # 每天 03:10 执行，业务低峰；6 位 Spring cron（秒 分 时 日 月 周）
+      cron: "0 10 3 * * ?"

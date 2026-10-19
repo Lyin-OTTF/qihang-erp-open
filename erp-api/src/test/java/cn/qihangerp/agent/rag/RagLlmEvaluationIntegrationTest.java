@@ -27,7 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("llm")
 @SpringBootTest(classes = ErpApi.class, webEnvironment = SpringBootTest.WebEnvironment.NONE, properties = {
         "agent.evaluation.llm-enabled=true",
-        "agent.evaluation.llm-timeout-seconds=90",
+        "agent.evaluation.llm-timeout-seconds=120",
+        "agent.evaluation.llm-max-attempts=3",
         "spring.data.redis.password=${REDIS_PASSWORD:}",
         "spring.ai.model.chat=none",
         "agent.vector-store.enabled=true"

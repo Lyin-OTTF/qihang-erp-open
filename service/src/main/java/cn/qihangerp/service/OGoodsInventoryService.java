@@ -2,6 +2,7 @@ package cn.qihangerp.service;
 
 import cn.qihangerp.common.PageQuery;
 import cn.qihangerp.common.PageResult;
+import cn.qihangerp.model.bo.InventoryChangeCommand;
 import cn.qihangerp.model.entity.OGoodsInventory;
 import com.baomidou.mybatisplus.extension.service.IService;
 
@@ -16,6 +17,17 @@ public interface OGoodsInventoryService extends IService<OGoodsInventory> {
      * 分页查询库存列表
      */
     PageResult<OGoodsInventory> queryPageList(OGoodsInventory bo, PageQuery pageQuery);
+
+    /**
+     * 执行一次库存变动：原子条件更新 + 同事务写流水。
+     *
+     * <p>这是库存变动的唯一入口。带业务上下文的调用方应使用本方法，
+     * 以便流水可追溯到业务单据并具备幂等能力。</p>
+     *
+     * @param cmd 变动指令
+     * @return true=变动成功；false=条件不满足（库存不足/可用量不足/记录不存在）
+     */
+    boolean changeStock(InventoryChangeCommand cmd);
 
     /**
      * 扣减库存（出库时调用）

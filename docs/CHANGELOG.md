@@ -19,10 +19,12 @@
 
 ### 真实跑批
 
-- 99 条用例全部完成真实生成与裁判，`runId=30`，模型 `deepseek-v4-flash`。
-- Recall@10 `0.8626`、MRR `0.7210`、NDCG@10 `0.7420`。
-- Answer Relevancy `0.7870`、Correctness `0.6108`、Faithfulness `0.9446`。
-- BLEU-4 `0.1254`、ROUGE-L `0.2467`、通过率 `58.59%`。
+- 新增 23 条知识文档，补齐订单合并/拆分、操作日志、自动审核、换货、运费险、批量发货、会员营销和系统备份等缺口。
+- rerank 候选从 Top-5 扩展到全部 20 个，并加入标题匹配、短语命中和向量分数。
+- 99 条用例全部完成真实生成与裁判，`runId=33`，模型 `deepseek-v4-flash`。
+- Recall@10 `0.9343`、MRR `0.8518`、NDCG@10 `0.8602`。
+- Answer Relevancy `0.9377`、Correctness `0.7868`、Faithfulness `0.9700`。
+- BLEU-4 `0.1671`、ROUGE-L `0.3144`、通过率 `84.85%`。
 
 详细报告见 [RAG-真实评测报告.md](RAG-真实评测报告.md)。
 
