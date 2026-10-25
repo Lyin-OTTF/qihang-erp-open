@@ -41,8 +41,26 @@ build/
 # ===== 项目内部 / 隐私文件（禁止提交到公开仓库）=====
 .workbuddy/
 _resume_extract.txt
-docs/简历相关/
 benchmark/reports/
+
+# 内部学习 / 面试 / 评审 / 简历材料：一律放 D:\code study\*-内部资料\，不进仓库。
+# 本仓库是公开 fork（上游 zeasin/qihang-erp-open），任何提交都可被任何人看到。
+docs/简历相关/
+docs/学习计划/
+docs/简历*/
+docs/模拟面试*
+docs/面试*
+docs/方案分析*
+docs/方案匹配度*
+docs/项目验收*
+docs/提交前审查*
+docs/*审查报告*
+docs/*评审*
+docs/Week*
+docs/第*阶段-*
+docs/PROGRESS.md
+docs/PROJECT_STATUS.md
+docs/FINAL_SUMMARY.md
 
 # 旧版前端（仅本地保留，不提交远程）
 vue2/
@@ -73,3 +91,5 @@ application-dev-local.yml
 # Docker本地环境变量
 docker-compose.override.yml
 .env.docker
+# 临时抓取数据 / 中间产物
+.wb_tmp/
