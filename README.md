@@ -8,7 +8,7 @@
 
 | 文档 | 说明 |
 |------|------|
-| 📖 [AI Agent 实现文档](docs/AI-AGENT-IMPLEMENTATION.md) | 架构设计、Week1-10迭代路线、核心模块详解、安全设计、测试验证、面试话术 |
+| 📖 [AI Agent 实现文档](docs/AI-AGENT-IMPLEMENTATION.md) | 架构设计、Week1-10迭代路线、核心模块详解、安全设计、测试验证 |
 | 🚀 [部署文档](docs/DEPLOYMENT.md) | 环境要求、Docker快速启动、环境变量配置、构建启动、常见问题 |
 
 **核心能力**：12个业务Tool函数调用、ToolGateway统一网关（租户隔离+自治等级+审批+审计+分布式锁+幂等）、RAG混合检索（PGVector+BM25+RRF+Rerank三级降级）、四层持久化记忆、DAG工作流断点续跑、审批流、全链路审计、离线评测闭环、Grafana监控。
