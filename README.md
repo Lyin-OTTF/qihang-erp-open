@@ -627,9 +627,21 @@ location /prod-api/ {
 # 压测：三组对照（旧实现 / 原子更新 / 原子更新+幂等），验证并发不超卖
 ./benchmark/run-benchmark.sh          # Windows: .\benchmark\run-benchmark.ps1
 
-# 对账与并发用例
-mvn -pl erp-api -am test -Dtest=StockReconcileServiceTest
-mvn -pl erp-api -am test -Dtest=InventoryConcurrencyTest
+# 对账与并发用例：这两个类标了 @Tag("it")，会被默认 surefire 的 excludedGroups 过滤掉，
+# 必须显式加 -Pintegration-tests，否则输出 "Tests run: 0"。
+# 它们直连本地 MySQL（默认 root / 1234 / 库名 qihang-erp），可用环境变量覆盖：
+export MYSQL_URL='jdbc:mysql://127.0.0.1:3306/qihang-erp?serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true'
+export MYSQL_USERNAME=root
+export MYSQL_PASSWORD=你的密码
+
+mvn -pl erp-api -am test -Pintegration-tests -Dtest=StockReconcileServiceTest -Dsurefire.failIfNoSpecifiedTests=false
+mvn -pl erp-api -am test -Pintegration-tests -Dtest=InventoryConcurrencyTest -Dsurefire.failIfNoSpecifiedTests=false
+
+# 判断是否真的跑起来：应看到 Tests run: 4（对账）与 Tests run: 3（并发）。
+# 若仍是 Tests run: 0，说明 MySQL 没连上或缺表——因为 -Dsurefire.failIfNoSpecifiedTests=false
+# 会让「一个用例都没跑」也算 BUILD SUCCESS，且 StockReconcileServiceTest 的 @BeforeAll
+# 用 assumeTrue 校验前置条件，不满足时是整体跳过而非报错，极易被误认为通过。
+# 库表由 Flyway 在首次启动时自动迁移，无需手工建。
 ```
 
 结构变更由 Flyway 自动执行（`erp-api/src/main/resources/db/migration/V1_32_0__inventory_flow_and_reconcile.sql`）；
