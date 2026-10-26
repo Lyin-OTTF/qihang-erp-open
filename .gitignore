@@ -41,7 +41,10 @@ build/
 # ===== 项目内部 / 隐私文件（禁止提交到公开仓库）=====
 .workbuddy/
 _resume_extract.txt
-benchmark/reports/
+# 压测报告（*.md）是「优化结论有数据支撑」的证据链，必须入库；
+# 原始采样与 JMeter HTML 产物体积大且可重跑，不入库。
+benchmark/reports/*.jtl
+benchmark/reports/jmeter-*/
 
 # 内部学习 / 面试 / 评审 / 简历材料：一律放 D:\code study\*-内部资料\，不进仓库。
 # 本仓库是公开 fork（上游 zeasin/qihang-erp-open），任何提交都可被任何人看到。
@@ -93,3 +96,6 @@ docker-compose.override.yml
 .env.docker
 # 临时抓取数据 / 中间产物
 .wb_tmp/
+
+# 内部审查交付物：简历对齐审查、可辩护度评估、面试话术一类，属内部材料，严禁公开
+deliverables/

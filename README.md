@@ -465,7 +465,7 @@ graph TD
 + 包含商品、订单、店铺、售后等各模块的数据访问和业务逻辑
 
 #### 2.6 `erp-api`单体应用（主入口）
-+ Spring Boot 4.1 单体应用，统一端口 8088
++ Spring Boot 4.1 单体应用，统一端口 6149
 + 按业务领域分包：
 
 | 包 | 功能 |
@@ -498,13 +498,32 @@ graph TD
 + 导入数据库结构：sql脚本`docs\qihang-erp.sql`
 
 #### 3.3、启动后端服务
+
+先设置环境变量。应用配置全部走占位符，**`JWT_SECRET` 没有默认值，不设置会直接启动失败**（防止回落到弱密钥）：
+
+```bash
+# 必填：JWT 签名密钥，建议 32 位以上随机串
+export JWT_SECRET="$(openssl rand -base64 32)"
+
+# 数据库（缺省：127.0.0.1:3306/qihang-erp，用户 root，密码为空）
+export MYSQL_URL="jdbc:mysql://127.0.0.1:3306/qihang-erp?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8"
+export MYSQL_USERNAME=root
+export MYSQL_PASSWORD=<你的数据库密码>
+
+# 可选：Redis（默认 127.0.0.1:6379 无密码）、向量库 PgVector、DEEPSEEK_API_KEY
+```
+
+也可以把这些写进仓库根目录的 `application-local.yml`（已在 `.gitignore` 中，不会被提交），再用 `--spring.profiles.active=local` 加载，避免密钥落到命令行历史里。
+
 ```bash
 # 编译打包
 mvn clean install
 
-# 运行（默认端口 8088）
+# 运行（默认端口 6149）
 java -jar erp-api/target/erp-api.jar
 ```
+
+> 数据库结构由 Flyway 在启动时自动迁移（`erp-api/src/main/resources/db/migration/`，`baseline-on-migrate: true`），已有业务表的老库无需手工重跑；也可按 3.2 直接导入 `docs/qihang-erp.sql`。
 
 #### 3.4、运行前端
 + Nodejs版本：v20.20.0
@@ -539,7 +558,7 @@ location /prod-api/ {
     proxy_http_version 1.1;    # 必须 HTTP/1.1
     proxy_buffering off;       # 关闭缓冲
     proxy_read_timeout 1800s;  # 长连接超时
-    proxy_pass http://127.0.0.1:8088/;
+    proxy_pass http://127.0.0.1:6149/;
 }
 ```
 
@@ -585,7 +604,7 @@ location /prod-api/ {
     proxy_connect_timeout 60s;    # 连接超时时间
     # --- 结束新增 ---
 
-    proxy_pass http://127.0.0.1:8088/;
+    proxy_pass http://127.0.0.1:6149/;
 }
 ```
 + docker运行
