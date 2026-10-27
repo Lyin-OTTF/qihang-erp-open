@@ -99,3 +99,6 @@ docker-compose.override.yml
 
 # 内部审查交付物：简历对齐审查、可辩护度评估、面试话术一类，属内部材料，严禁公开
 deliverables/
+
+# 编辑钩子快照缓存（含被改文件基线，不得入库）
+.mimosa/
